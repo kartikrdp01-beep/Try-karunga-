@@ -1,0 +1,4194 @@
+--[[
+================================================================================
+                            EMILY RECHAT
+                         Creator: FC_Emily
+================================================================================
+Single-file Roblox LocalScript replacement written from scratch.
+
+INSTALLATION
+    Roblox Studio -> StarterPlayer -> StarterPlayerScripts -> LocalScript
+    Paste this entire file into the LocalScript and run the experience.
+
+IMPORTANT IMPLEMENTATION NOTES
+    * Uses Roblox TextChatService's normal message path for public messages.
+    * Does not forge another player's identity or change Roblox's real username.
+    * Does not bypass Roblox text filtering or platform chat permissions.
+    * Includes a small send cooldown so the UI cannot flood the chat service.
+    * Local AI messages, RP profile fields, themes and stickers are UI features.
+    * CoreGui parenting is attempted only as a convenience; ordinary LocalScripts
+      are expected to fall back to PlayerGui because CoreGui is Roblox-controlled.
+    * No loadstring, remote code loading, executor globals, or HTTP requests.
+================================================================================
+]]
+
+--// Services ------------------------------------------------------------------
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local TextService = game:GetService("TextService")
+local GuiService = game:GetService("GuiService")
+
+--// Runtime references ---------------------------------------------------------
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    warn("[EMILY RECHAT] LocalPlayer is not available. Run this as a LocalScript.")
+    return
+end
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local ExistingGui = PlayerGui:FindFirstChild("EMILY_RECHAT")
+if ExistingGui then
+    ExistingGui:Destroy()
+end
+
+local ExistingCoreGui
+pcall(function()
+    ExistingCoreGui = CoreGui:FindFirstChild("EMILY_RECHAT")
+    if ExistingCoreGui then
+        ExistingCoreGui:Destroy()
+    end
+end)
+
+--// Constants -----------------------------------------------------------------
+local APP_NAME = "EMILY RECHAT"
+local APP_CREATOR = "FC_Emily"
+local APP_VERSION = "2.0.0"
+local MAX_VISIBLE_MESSAGES = 180
+local MAX_STORED_MESSAGES = 500
+local SEND_COOLDOWN = 1.35
+local MAX_MESSAGE_LENGTH = 180
+local DEFAULT_RP_NAME = LocalPlayer.DisplayName or LocalPlayer.Name
+local DEFAULT_BIO = "welcome, " .. LocalPlayer.Name .. " 👋"
+local WINDOW_DESIGN_SIZE = Vector2.new(960, 640)
+local TOUCH_WINDOW_SIZE = Vector2.new(850, 610)
+
+--// Theme catalogue ------------------------------------------------------------
+-- Entries are real selectable palettes used by the theme picker.
+local Themes = {
+    {Name="Rose Glass",
+        Bg=Color3.fromRGB(17,
+        14,
+        23),
+        Panel=Color3.fromRGB(27,
+        22,
+        35),
+        Surface=Color3.fromRGB(38,
+        29,
+        48),
+        Accent=Color3.fromRGB(255,
+        76,
+        145),
+        Accent2=Color3.fromRGB(255,
+        145,
+        187),
+        Text=Color3.fromRGB(250,
+        242,
+        249),
+        Muted=Color3.fromRGB(170,
+        152,
+        176)},
+    {Name="Ruby Red",
+        Bg=Color3.fromRGB(19,
+        13,
+        17),
+        Panel=Color3.fromRGB(33,
+        21,
+        27),
+        Surface=Color3.fromRGB(48,
+        27,
+        35),
+        Accent=Color3.fromRGB(244,
+        54,
+        83),
+        Accent2=Color3.fromRGB(255,
+        120,
+        132),
+        Text=Color3.fromRGB(255,
+        244,
+        246),
+        Muted=Color3.fromRGB(179,
+        145,
+        151)},
+    {Name="Crimson",
+        Bg=Color3.fromRGB(17,
+        12,
+        14),
+        Panel=Color3.fromRGB(30,
+        18,
+        22),
+        Surface=Color3.fromRGB(47,
+        24,
+        30),
+        Accent=Color3.fromRGB(214,
+        30,
+        61),
+        Accent2=Color3.fromRGB(252,
+        92,
+        104),
+        Text=Color3.fromRGB(255,
+        243,
+        244),
+        Muted=Color3.fromRGB(169,
+        139,
+        143)},
+    {Name="Sunset",
+        Bg=Color3.fromRGB(22,
+        15,
+        19),
+        Panel=Color3.fromRGB(39,
+        23,
+        32),
+        Surface=Color3.fromRGB(57,
+        30,
+        40),
+        Accent=Color3.fromRGB(255,
+        103,
+        90),
+        Accent2=Color3.fromRGB(255,
+        174,
+        96),
+        Text=Color3.fromRGB(255,
+        246,
+        239),
+        Muted=Color3.fromRGB(187,
+        155,
+        149)},
+    {Name="Orange Glow",
+        Bg=Color3.fromRGB(22,
+        17,
+        12),
+        Panel=Color3.fromRGB(40,
+        29,
+        20),
+        Surface=Color3.fromRGB(58,
+        39,
+        25),
+        Accent=Color3.fromRGB(255,
+        136,
+        42),
+        Accent2=Color3.fromRGB(255,
+        193,
+        85),
+        Text=Color3.fromRGB(255,
+        247,
+        234),
+        Muted=Color3.fromRGB(180,
+        159,
+        137)},
+    {Name="Gold",
+        Bg=Color3.fromRGB(20,
+        18,
+        12),
+        Panel=Color3.fromRGB(36,
+        32,
+        20),
+        Surface=Color3.fromRGB(53,
+        45,
+        25),
+        Accent=Color3.fromRGB(246,
+        190,
+        52),
+        Accent2=Color3.fromRGB(255,
+        220,
+        113),
+        Text=Color3.fromRGB(255,
+        250,
+        230),
+        Muted=Color3.fromRGB(179,
+        165,
+        131)},
+    {Name="Lime",
+        Bg=Color3.fromRGB(15,
+        20,
+        13),
+        Panel=Color3.fromRGB(25,
+        37,
+        22),
+        Surface=Color3.fromRGB(34,
+        51,
+        29),
+        Accent=Color3.fromRGB(166,
+        227,
+        57),
+        Accent2=Color3.fromRGB(214,
+        255,
+        116),
+        Text=Color3.fromRGB(246,
+        255,
+        238),
+        Muted=Color3.fromRGB(155,
+        179,
+        142)},
+    {Name="Neon Green",
+        Bg=Color3.fromRGB(10,
+        19,
+        14),
+        Panel=Color3.fromRGB(18,
+        35,
+        26),
+        Surface=Color3.fromRGB(25,
+        49,
+        36),
+        Accent=Color3.fromRGB(48,
+        230,
+        120),
+        Accent2=Color3.fromRGB(117,
+        255,
+        169),
+        Text=Color3.fromRGB(239,
+        255,
+        245),
+        Muted=Color3.fromRGB(139,
+        179,
+        154)},
+    {Name="Mint",
+        Bg=Color3.fromRGB(12,
+        20,
+        20),
+        Panel=Color3.fromRGB(20,
+        36,
+        35),
+        Surface=Color3.fromRGB(27,
+        51,
+        49),
+        Accent=Color3.fromRGB(75,
+        218,
+        186),
+        Accent2=Color3.fromRGB(143,
+        255,
+        223),
+        Text=Color3.fromRGB(239,
+        255,
+        251),
+        Muted=Color3.fromRGB(142,
+        179,
+        172)},
+    {Name="Teal",
+        Bg=Color3.fromRGB(11,
+        18,
+        22),
+        Panel=Color3.fromRGB(19,
+        32,
+        39),
+        Surface=Color3.fromRGB(25,
+        46,
+        54),
+        Accent=Color3.fromRGB(35,
+        196,
+        190),
+        Accent2=Color3.fromRGB(96,
+        239,
+        220),
+        Text=Color3.fromRGB(238,
+        255,
+        255),
+        Muted=Color3.fromRGB(137,
+        170,
+        177)},
+    {Name="Cyan",
+        Bg=Color3.fromRGB(10,
+        17,
+        24),
+        Panel=Color3.fromRGB(18,
+        30,
+        43),
+        Surface=Color3.fromRGB(24,
+        43,
+        59),
+        Accent=Color3.fromRGB(47,
+        190,
+        255),
+        Accent2=Color3.fromRGB(128,
+        226,
+        255),
+        Text=Color3.fromRGB(239,
+        250,
+        255),
+        Muted=Color3.fromRGB(138,
+        166,
+        186)},
+    {Name="Royal Blue",
+        Bg=Color3.fromRGB(12,
+        15,
+        25),
+        Panel=Color3.fromRGB(22,
+        27,
+        45),
+        Surface=Color3.fromRGB(29,
+        37,
+        61),
+        Accent=Color3.fromRGB(74,
+        119,
+        255),
+        Accent2=Color3.fromRGB(141,
+        166,
+        255),
+        Text=Color3.fromRGB(242,
+        245,
+        255),
+        Muted=Color3.fromRGB(144,
+        154,
+        190)},
+    {Name="Sapphire",
+        Bg=Color3.fromRGB(10,
+        13,
+        25),
+        Panel=Color3.fromRGB(18,
+        24,
+        47),
+        Surface=Color3.fromRGB(25,
+        34,
+        65),
+        Accent=Color3.fromRGB(49,
+        94,
+        218),
+        Accent2=Color3.fromRGB(111,
+        150,
+        255),
+        Text=Color3.fromRGB(241,
+        245,
+        255),
+        Muted=Color3.fromRGB(134,
+        151,
+        191)},
+    {Name="Neon Purple",
+        Bg=Color3.fromRGB(17,
+        12,
+        25),
+        Panel=Color3.fromRGB(29,
+        20,
+        43),
+        Surface=Color3.fromRGB(41,
+        27,
+        61),
+        Accent=Color3.fromRGB(175,
+        89,
+        255),
+        Accent2=Color3.fromRGB(218,
+        159,
+        255),
+        Text=Color3.fromRGB(251,
+        242,
+        255),
+        Muted=Color3.fromRGB(167,
+        143,
+        190)},
+    {Name="Violet",
+        Bg=Color3.fromRGB(17,
+        13,
+        23),
+        Panel=Color3.fromRGB(29,
+        22,
+        39),
+        Surface=Color3.fromRGB(42,
+        30,
+        55),
+        Accent=Color3.fromRGB(145,
+        100,
+        245),
+        Accent2=Color3.fromRGB(195,
+        164,
+        255),
+        Text=Color3.fromRGB(249,
+        244,
+        255),
+        Muted=Color3.fromRGB(162,
+        147,
+        183)},
+    {Name="Lavender",
+        Bg=Color3.fromRGB(19,
+        16,
+        24),
+        Panel=Color3.fromRGB(34,
+        28,
+        43),
+        Surface=Color3.fromRGB(47,
+        39,
+        58),
+        Accent=Color3.fromRGB(180,
+        147,
+        255),
+        Accent2=Color3.fromRGB(222,
+        205,
+        255),
+        Text=Color3.fromRGB(252,
+        248,
+        255),
+        Muted=Color3.fromRGB(176,
+        163,
+        191)},
+    {Name="Ice",
+        Bg=Color3.fromRGB(14,
+        19,
+        24),
+        Panel=Color3.fromRGB(24,
+        32,
+        40),
+        Surface=Color3.fromRGB(33,
+        45,
+        54),
+        Accent=Color3.fromRGB(146,
+        220,
+        255),
+        Accent2=Color3.fromRGB(205,
+        244,
+        255),
+        Text=Color3.fromRGB(245,
+        253,
+        255),
+        Muted=Color3.fromRGB(157,
+        180,
+        192)},
+    {Name="Midnight",
+        Bg=Color3.fromRGB(8,
+        10,
+        17),
+        Panel=Color3.fromRGB(15,
+        19,
+        30),
+        Surface=Color3.fromRGB(22,
+        28,
+        43),
+        Accent=Color3.fromRGB(100,
+        131,
+        255),
+        Accent2=Color3.fromRGB(164,
+        184,
+        255),
+        Text=Color3.fromRGB(240,
+        244,
+        255),
+        Muted=Color3.fromRGB(128,
+        139,
+        166)},
+    {Name="Graphite",
+        Bg=Color3.fromRGB(15,
+        16,
+        19),
+        Panel=Color3.fromRGB(25,
+        27,
+        31),
+        Surface=Color3.fromRGB(36,
+        39,
+        44),
+        Accent=Color3.fromRGB(190,
+        198,
+        210),
+        Accent2=Color3.fromRGB(236,
+        240,
+        245),
+        Text=Color3.fromRGB(250,
+        250,
+        252),
+        Muted=Color3.fromRGB(153,
+        157,
+        164)},
+    {Name="Monochrome",
+        Bg=Color3.fromRGB(13,
+        13,
+        14),
+        Panel=Color3.fromRGB(24,
+        24,
+        25),
+        Surface=Color3.fromRGB(36,
+        36,
+        37),
+        Accent=Color3.fromRGB(232,
+        232,
+        235),
+        Accent2=Color3.fromRGB(255,
+        255,
+        255),
+        Text=Color3.fromRGB(250,
+        250,
+        250),
+        Muted=Color3.fromRGB(151,
+        151,
+        155)},
+    {Name="Coffee",
+        Bg=Color3.fromRGB(20,
+        15,
+        13),
+        Panel=Color3.fromRGB(36,
+        27,
+        23),
+        Surface=Color3.fromRGB(52,
+        38,
+        30),
+        Accent=Color3.fromRGB(200,
+        137,
+        91),
+        Accent2=Color3.fromRGB(237,
+        190,
+        142),
+        Text=Color3.fromRGB(255,
+        247,
+        239),
+        Muted=Color3.fromRGB(177,
+        150,
+        132)},
+    {Name="Cherry Blossom",
+        Bg=Color3.fromRGB(22,
+        15,
+        22),
+        Panel=Color3.fromRGB(39,
+        25,
+        41),
+        Surface=Color3.fromRGB(56,
+        34,
+        58),
+        Accent=Color3.fromRGB(255,
+        130,
+        190),
+        Accent2=Color3.fromRGB(255,
+        191,
+        218),
+        Text=Color3.fromRGB(255,
+        246,
+        251),
+        Muted=Color3.fromRGB(190,
+        153,
+        181)},
+    {Name="Cotton Candy",
+        Bg=Color3.fromRGB(17,
+        17,
+        28),
+        Panel=Color3.fromRGB(28,
+        29,
+        47),
+        Surface=Color3.fromRGB(41,
+        43,
+        65),
+        Accent=Color3.fromRGB(255,
+        133,
+        214),
+        Accent2=Color3.fromRGB(125,
+        205,
+        255),
+        Text=Color3.fromRGB(252,
+        247,
+        255),
+        Muted=Color3.fromRGB(165,
+        158,
+        192)},
+    {Name="Aurora",
+        Bg=Color3.fromRGB(10,
+        19,
+        25),
+        Panel=Color3.fromRGB(18,
+        34,
+        43),
+        Surface=Color3.fromRGB(26,
+        48,
+        57),
+        Accent=Color3.fromRGB(79,
+        223,
+        177),
+        Accent2=Color3.fromRGB(135,
+        173,
+        255),
+        Text=Color3.fromRGB(241,
+        255,
+        251),
+        Muted=Color3.fromRGB(139,
+        178,
+        179)},
+    {Name="Cyberpunk",
+        Bg=Color3.fromRGB(13,
+        12,
+        24),
+        Panel=Color3.fromRGB(24,
+        21,
+        43),
+        Surface=Color3.fromRGB(34,
+        28,
+        57),
+        Accent=Color3.fromRGB(255,
+        54,
+        180),
+        Accent2=Color3.fromRGB(57,
+        245,
+        255),
+        Text=Color3.fromRGB(253,
+        245,
+        255),
+        Muted=Color3.fromRGB(162,
+        145,
+        192)},
+    {Name="Toxic",
+        Bg=Color3.fromRGB(12,
+        20,
+        12),
+        Panel=Color3.fromRGB(22,
+        36,
+        20),
+        Surface=Color3.fromRGB(31,
+        49,
+        28),
+        Accent=Color3.fromRGB(188,
+        255,
+        43),
+        Accent2=Color3.fromRGB(233,
+        255,
+        116),
+        Text=Color3.fromRGB(247,
+        255,
+        235),
+        Muted=Color3.fromRGB(154,
+        181,
+        137)},
+    {Name="Ocean",
+        Bg=Color3.fromRGB(9,
+        17,
+        25),
+        Panel=Color3.fromRGB(17,
+        31,
+        45),
+        Surface=Color3.fromRGB(24,
+        45,
+        61),
+        Accent=Color3.fromRGB(46,
+        151,
+        221),
+        Accent2=Color3.fromRGB(105,
+        206,
+        246),
+        Text=Color3.fromRGB(239,
+        250,
+        255),
+        Muted=Color3.fromRGB(132,
+        163,
+        186)},
+    {Name="Forest",
+        Bg=Color3.fromRGB(11,
+        18,
+        14),
+        Panel=Color3.fromRGB(19,
+        32,
+        24),
+        Surface=Color3.fromRGB(27,
+        45,
+        32),
+        Accent=Color3.fromRGB(69,
+        172,
+        103),
+        Accent2=Color3.fromRGB(138,
+        218,
+        157),
+        Text=Color3.fromRGB(241,
+        255,
+        245),
+        Muted=Color3.fromRGB(137,
+        170,
+        145)},
+    {Name="Peach",
+        Bg=Color3.fromRGB(23,
+        17,
+        16),
+        Panel=Color3.fromRGB(40,
+        28,
+        27),
+        Surface=Color3.fromRGB(57,
+        38,
+        36),
+        Accent=Color3.fromRGB(255,
+        150,
+        125),
+        Accent2=Color3.fromRGB(255,
+        206,
+        160),
+        Text=Color3.fromRGB(255,
+        248,
+        243),
+        Muted=Color3.fromRGB(189,
+        158,
+        149)},
+    {Name="Electric",
+        Bg=Color3.fromRGB(9,
+        14,
+        24),
+        Panel=Color3.fromRGB(16,
+        26,
+        43),
+        Surface=Color3.fromRGB(23,
+        37,
+        60),
+        Accent=Color3.fromRGB(62,
+        128,
+        255),
+        Accent2=Color3.fromRGB(43,
+        234,
+        255),
+        Text=Color3.fromRGB(241,
+        249,
+        255),
+        Muted=Color3.fromRGB(132,
+        155,
+        190)},
+    {Name="Plum",
+        Bg=Color3.fromRGB(21,
+        13,
+        22),
+        Panel=Color3.fromRGB(37,
+        23,
+        39),
+        Surface=Color3.fromRGB(53,
+        32,
+        55),
+        Accent=Color3.fromRGB(201,
+        97,
+        193),
+        Accent2=Color3.fromRGB(239,
+        161,
+        221),
+        Text=Color3.fromRGB(255,
+        245,
+        254),
+        Muted=Color3.fromRGB(183,
+        147,
+        181)},
+    {Name="Arctic",
+        Bg=Color3.fromRGB(12,
+        18,
+        24),
+        Panel=Color3.fromRGB(20,
+        30,
+        40),
+        Surface=Color3.fromRGB(29,
+        43,
+        55),
+        Accent=Color3.fromRGB(116,
+        206,
+        235),
+        Accent2=Color3.fromRGB(200,
+        241,
+        255),
+        Text=Color3.fromRGB(244,
+        252,
+        255),
+        Muted=Color3.fromRGB(151,
+        179,
+        190)},
+    {Name="Rose Gold",
+        Bg=Color3.fromRGB(21,
+        16,
+        19),
+        Panel=Color3.fromRGB(37,
+        27,
+        32),
+        Surface=Color3.fromRGB(53,
+        37,
+        42),
+        Accent=Color3.fromRGB(219,
+        151,
+        151),
+        Accent2=Color3.fromRGB(255,
+        209,
+        188),
+        Text=Color3.fromRGB(255,
+        248,
+        246),
+        Muted=Color3.fromRGB(184,
+        154,
+        153)},
+    {Name="Lavender Dream",
+        Bg=Color3.fromRGB(19,
+        16,
+        27),
+        Panel=Color3.fromRGB(32,
+        27,
+        46),
+        Surface=Color3.fromRGB(46,
+        39,
+        64),
+        Accent=Color3.fromRGB(181,
+        157,
+        255),
+        Accent2=Color3.fromRGB(237,
+        181,
+        255),
+        Text=Color3.fromRGB(252,
+        247,
+        255),
+        Muted=Color3.fromRGB(174,
+        161,
+        197)},
+    {Name="Solar",
+        Bg=Color3.fromRGB(22,
+        16,
+        12),
+        Panel=Color3.fromRGB(38,
+        28,
+        19),
+        Surface=Color3.fromRGB(54,
+        40,
+        24),
+        Accent=Color3.fromRGB(255,
+        166,
+        55),
+        Accent2=Color3.fromRGB(255,
+        222,
+        101),
+        Text=Color3.fromRGB(255,
+        249,
+        234),
+        Muted=Color3.fromRGB(187,
+        161,
+        129)},
+    {Name="Emerald",
+        Bg=Color3.fromRGB(10,
+        19,
+        17),
+        Panel=Color3.fromRGB(18,
+        34,
+        30),
+        Surface=Color3.fromRGB(25,
+        49,
+        43),
+        Accent=Color3.fromRGB(31,
+        207,
+        142),
+        Accent2=Color3.fromRGB(119,
+        255,
+        199),
+        Text=Color3.fromRGB(239,
+        255,
+        250),
+        Muted=Color3.fromRGB(134,
+        178,
+        163)},
+    {Name="Berry",
+        Bg=Color3.fromRGB(21,
+        13,
+        22),
+        Panel=Color3.fromRGB(38,
+        23,
+        40),
+        Surface=Color3.fromRGB(54,
+        32,
+        58),
+        Accent=Color3.fromRGB(229,
+        76,
+        145),
+        Accent2=Color3.fromRGB(255,
+        155,
+        190),
+        Text=Color3.fromRGB(255,
+        245,
+        251),
+        Muted=Color3.fromRGB(184,
+        145,
+        175)},
+    {Name="Dusk",
+        Bg=Color3.fromRGB(14,
+        17,
+        27),
+        Panel=Color3.fromRGB(24,
+        29,
+        45),
+        Surface=Color3.fromRGB(34,
+        40,
+        60),
+        Accent=Color3.fromRGB(142,
+        125,
+        224),
+        Accent2=Color3.fromRGB(233,
+        137,
+        191),
+        Text=Color3.fromRGB(248,
+        246,
+        255),
+        Muted=Color3.fromRGB(152,
+        155,
+        190)},
+    {Name="Pixel",
+        Bg=Color3.fromRGB(11,
+        17,
+        20),
+        Panel=Color3.fromRGB(20,
+        31,
+        35),
+        Surface=Color3.fromRGB(28,
+        45,
+        48),
+        Accent=Color3.fromRGB(91,
+        255,
+        205),
+        Accent2=Color3.fromRGB(255,
+        118,
+        185),
+        Text=Color3.fromRGB(242,
+        255,
+        251),
+        Muted=Color3.fromRGB(143,
+        179,
+        171)},
+}
+
+-- Additional hue presets are generated as distinct selectable palettes. The
+-- selection list stays compact in code while still providing a large catalogue.
+local function HsvColor(hue, saturation, value)
+    return Color3.fromHSV((hue % 360) / 360, saturation, value)
+end
+
+for index = 1, 48 do
+    local hue = (index * 137.508) % 360
+    local accent = HsvColor(hue, 0.78, 1)
+    local accent2 = HsvColor(hue + 24, 0.48, 1)
+    local bg = HsvColor(hue + 196, 0.32, 0.075)
+    local panel = HsvColor(hue + 196, 0.30, 0.13)
+    local surface = HsvColor(hue + 196, 0.28, 0.19)
+    table.insert(Themes, {
+        Name = string.format("Spectrum %02d", index),
+        Bg = bg,
+        Panel = panel,
+        Surface = surface,
+        Accent = accent,
+        Accent2 = accent2,
+        Text = Color3.fromRGB(249, 248, 255),
+        Muted = Color3.fromRGB(166, 163, 185),
+    })
+end
+
+--// Gallery catalogue ----------------------------------------------------------
+-- Sticker cards add their selected emoji to the composer; they do not upload
+-- files or run remote content.
+local Stickers = {
+    {Emoji="👋", Name="Hello"}, {Emoji="😊", Name="Smile"}, {Emoji="😂", Name="Laugh"},
+    {Emoji="🥹", Name="Soft"}, {Emoji="😍", Name="Love eyes"}, {Emoji="😎", Name="Cool"},
+    {Emoji="🤔", Name="Thinking"}, {Emoji="😴", Name="Sleepy"}, {Emoji="😭", Name="Crying"},
+    {Emoji="😤", Name="Determined"}, {Emoji="🥳", Name="Party"}, {Emoji="🤗", Name="Hug"},
+    {Emoji="🫶", Name="Heart hands"}, {Emoji="💖", Name="Pink heart"}, {Emoji="❤️", Name="Red heart"},
+    {Emoji="💜",
+        Name="Purple heart"},
+        {Emoji="💙",
+        Name="Blue heart"},
+        {Emoji="💚",
+        Name="Green heart"},
+    {Emoji="💛",
+        Name="Yellow heart"},
+        {Emoji="🖤",
+        Name="Black heart"},
+        {Emoji="🤍",
+        Name="White heart"},
+    {Emoji="✨", Name="Sparkles"}, {Emoji="⭐", Name="Star"}, {Emoji="🌟", Name="Glowing star"},
+    {Emoji="⚡", Name="Lightning"}, {Emoji="🔥", Name="Fire"}, {Emoji="🌈", Name="Rainbow"},
+    {Emoji="🌸", Name="Cherry blossom"}, {Emoji="🌺", Name="Hibiscus"}, {Emoji="🌻", Name="Sunflower"},
+    {Emoji="🌙", Name="Moon"}, {Emoji="☀️", Name="Sun"}, {Emoji="🌧️", Name="Rain"},
+    {Emoji="❄️", Name="Snowflake"}, {Emoji="☕", Name="Coffee"}, {Emoji="🍓", Name="Strawberry"},
+    {Emoji="🍒", Name="Cherries"}, {Emoji="🍉", Name="Watermelon"}, {Emoji="🍪", Name="Cookie"},
+    {Emoji="🍰", Name="Cake"}, {Emoji="🍕", Name="Pizza"}, {Emoji="🍟", Name="Fries"},
+    {Emoji="🧋", Name="Boba"}, {Emoji="🎀", Name="Ribbon"}, {Emoji="🧸", Name="Teddy"},
+    {Emoji="🐱", Name="Cat"}, {Emoji="🐶", Name="Dog"}, {Emoji="🐼", Name="Panda"},
+    {Emoji="🦋", Name="Butterfly"}, {Emoji="🐸", Name="Frog"}, {Emoji="🐣", Name="Chick"},
+    {Emoji="🐻", Name="Bear"}, {Emoji="🐰", Name="Bunny"}, {Emoji="🦄", Name="Unicorn"},
+    {Emoji="🎮", Name="Game"}, {Emoji="🎧", Name="Headphones"}, {Emoji="🎵", Name="Music"},
+    {Emoji="🎤", Name="Mic"}, {Emoji="🎉", Name="Confetti"}, {Emoji="🎁", Name="Gift"},
+    {Emoji="🏆", Name="Trophy"}, {Emoji="💎", Name="Gem"}, {Emoji="👑", Name="Crown"},
+    {Emoji="🪄", Name="Magic"}, {Emoji="🪩", Name="Disco"}, {Emoji="🚀", Name="Rocket"},
+    {Emoji="🌍", Name="World"}, {Emoji="🚗", Name="Car"}, {Emoji="✈️", Name="Plane"},
+    {Emoji="🏖️", Name="Beach"}, {Emoji="🏡", Name="Home"}, {Emoji="🛍️", Name="Shopping"},
+    {Emoji="🫧", Name="Bubbles"}, {Emoji="🪷", Name="Lotus"}, {Emoji="🪽", Name="Wings"},
+    {Emoji="💫", Name="Dizzy star"}, {Emoji="💥", Name="Boom"}, {Emoji="💯", Name="100"},
+    {Emoji="✅", Name="Check"}, {Emoji="❌", Name="Cross"}, {Emoji="❓", Name="Question"},
+    {Emoji="❗", Name="Exclamation"}, {Emoji="🔔", Name="Bell"}, {Emoji="🔒", Name="Lock"},
+    {Emoji="🔑", Name="Key"}, {Emoji="📌", Name="Pin"}, {Emoji="📷", Name="Camera"},
+    {Emoji="📚", Name="Books"}, {Emoji="📝", Name="Note"}, {Emoji="💌", Name="Love letter"},
+    {Emoji="💬", Name="Chat"}, {Emoji="📣", Name="Announcement"}, {Emoji="🕊️", Name="Peace"},
+    {Emoji="🤝", Name="Handshake"}, {Emoji="🙏", Name="Thanks"}, {Emoji="👏", Name="Clap"},
+    {Emoji="🙌", Name="Celebrate"}, {Emoji="👍", Name="Like"}, {Emoji="👎", Name="Dislike"},
+    {Emoji="👌", Name="Okay"}, {Emoji="✌️", Name="Peace sign"}, {Emoji="🤞", Name="Fingers crossed"},
+    {Emoji="🫡", Name="Salute"}, {Emoji="🤩", Name="Starstruck"}, {Emoji="🥰", Name="Adore"},
+    {Emoji="😇", Name="Angel"}, {Emoji="🫠", Name="Melting"}, {Emoji="😈", Name="Mischief"},
+    {Emoji="👻", Name="Ghost"}, {Emoji="💀", Name="Skull"}, {Emoji="🤖", Name="Robot"},
+    {Emoji="👾", Name="Alien game"}, {Emoji="👽", Name="Alien"}, {Emoji="🪐", Name="Planet"},
+    {Emoji="🌌", Name="Galaxy"}, {Emoji="🌊", Name="Wave"}, {Emoji="🍀", Name="Clover"},
+    {Emoji="🌿", Name="Leaf"}, {Emoji="🍄", Name="Mushroom"}, {Emoji="🪻", Name="Hyacinth"},
+    {Emoji="🌷", Name="Tulip"}, {Emoji="🌼", Name="Blossom"}, {Emoji="🍁", Name="Maple"},
+    {Emoji="🥑", Name="Avocado"}, {Emoji="🍩", Name="Donut"}, {Emoji="🧁", Name="Cupcake"},
+    {Emoji="🍫", Name="Chocolate"}, {Emoji="🍬", Name="Candy"}, {Emoji="🍭", Name="Lollipop"},
+    {Emoji="🍿", Name="Popcorn"}, {Emoji="🥤", Name="Drink"}, {Emoji="🧃", Name="Juice"},
+    {Emoji="🪄", Name="Wand"}, {Emoji="🎨", Name="Palette"}, {Emoji="🧩", Name="Puzzle"},
+    {Emoji="🎲", Name="Dice"}, {Emoji="🕹️", Name="Joystick"}, {Emoji="🎯", Name="Target"},
+    {Emoji="🏹", Name="Bow"}, {Emoji="⚽", Name="Soccer"}, {Emoji="🏀", Name="Basketball"},
+    {Emoji="🏐", Name="Volleyball"}, {Emoji="🎾", Name="Tennis"}, {Emoji="🏸", Name="Badminton"},
+    {Emoji="🏓", Name="Ping pong"}, {Emoji="🥇", Name="Gold medal"}, {Emoji="🥈", Name="Silver medal"},
+    {Emoji="🥉", Name="Bronze medal"}, {Emoji="🎟️", Name="Ticket"}, {Emoji="🎬", Name="Movie"},
+    {Emoji="🎹", Name="Piano"}, {Emoji="🎻", Name="Violin"}, {Emoji="🥁", Name="Drum"},
+    {Emoji="🎷", Name="Saxophone"}, {Emoji="🎸", Name="Guitar"}, {Emoji="🎺", Name="Trumpet"},
+    {Emoji="🛸", Name="UFO"}, {Emoji="🧿", Name="Nazar"}, {Emoji="🪬", Name="Hamsa"},
+    {Emoji="🪷",
+        Name="Lotus flower"},
+        {Emoji="🪻",
+        Name="Purple flower"},
+        {Emoji="🩷",
+        Name="Pink heart"},
+    {Emoji="🩵",
+        Name="Light blue heart"},
+        {Emoji="🩶",
+        Name="Grey heart"},
+        {Emoji="🤎",
+        Name="Brown heart"},
+    {Emoji="❣️",
+        Name="Heart exclamation"},
+        {Emoji="💝",
+        Name="Heart gift"},
+        {Emoji="💞",
+        Name="Spinning hearts"},
+    {Emoji="💓",
+        Name="Beating heart"},
+        {Emoji="💗",
+        Name="Growing heart"},
+        {Emoji="💘",
+        Name="Cupid heart"},
+    {Emoji="💟",
+        Name="Heart decoration"},
+        {Emoji="🩷✨",
+        Name="Pink sparkle"},
+        {Emoji="🌸🎀",
+        Name="Pink bundle"},
+    {Emoji="🌙⭐", Name="Night sky"}, {Emoji="🍓💗", Name="Berry love"}, {Emoji="🐱💖", Name="Cute cat"},
+    {Emoji="🧸🎀",
+        Name="Teddy ribbon"},
+        {Emoji="🦋✨",
+        Name="Butterfly sparkle"},
+        {Emoji="🎮⚡",
+        Name="Game boost"},
+    {Emoji="🌈🫧",
+        Name="Rainbow bubbles"},
+        {Emoji="☕📚",
+        Name="Cozy study"},
+        {Emoji="🎧🌙",
+        Name="Night music"},
+    {Emoji="🥳🎉",
+        Name="Big celebration"},
+        {Emoji="👑💎",
+        Name="Royal"},
+        {Emoji="💌🌷",
+        Name="Sweet note"},
+}
+
+--// Quick replies --------------------------------------------------------------
+-- These are optional local inserts. The user still presses Send themselves.
+local QuickReplies = {
+    "Hey! 👋", "Hii!! 💗", "How are you?", "I'm good, thanks!", "What's up?",
+    "Nice to meet you!", "Good game! 🎮", "GG!", "Thanks a lot! 💖", "No problem!",
+    "See you later! 👋", "One sec...", "I'm back!", "Let's go! 🔥", "That's cool! ✨",
+    "LOL 😂", "Wait for me!", "Follow me!", "Where are you?", "I'm here!",
+    "Can you help me?", "Sure!", "Maybe later.", "That sounds fun!", "Let's do it!",
+    "Nice avatar!", "Love your style! 🎀", "Cute! 🌸", "Amazing!", "Well played!",
+    "Good luck! 🍀", "Have fun!", "Welcome!", "You're welcome!", "All good!",
+    "I agree.", "Not sure yet.", "Let's change server.", "Ready when you are.", "I'm listening.",
+    "That's hilarious 😂", "Aww, thank you!", "You made my day!", "Take care!", "Be right back.",
+    "Can we team up?", "Invite me!", "Nice work!", "That was close!", "We got this! 💪",
+    "No worries.", "All set!", "Thanks for waiting.", "I'm in!", "I'm out for now.",
+    "Catch you soon!", "Good morning ☀️", "Good night 🌙", "Happy birthday! 🎂", "Congrats!! 🎉",
+}
+
+--// App state -----------------------------------------------------------------
+local State = {
+    ThemeIndex = 1,
+    Theme = Themes[1],
+    RPName = DEFAULT_RP_NAME,
+    Bio = DEFAULT_BIO,
+    ActiveTab = "CHAT",
+    Minimized = false,
+    Closed = false,
+    SoundEnabled = true,
+    Timestamps = true,
+    CompactMessages = false,
+    RGBBorder = true,
+    EnterToSend = true,
+    ShowNotifications = true,
+    MessageHistory = {},
+    MessageObjects = {},
+    IgnoredUsers = {},
+    PinnedUsers = {},
+    SelectedDM = nil,
+    SearchText = "",
+    Unread = 0,
+    MessageCount = 0,
+    LastSendAt = 0,
+    SendPending = false,
+    VoicePreview = false,
+    WindowTransparency = 0,
+    UIOffset = Vector2.new(0, 0),
+    NotificationQueue = {},
+}
+
+--// Utility functions ----------------------------------------------------------
+local function Clamp(value, low, high)
+    return math.max(low, math.min(high, value))
+end
+
+local function SafeDestroy(instance)
+    if instance and instance.Parent then
+        pcall(function()
+            instance:Destroy()
+        end)
+    end
+end
+
+local function Create(className, props, parent)
+    local object = Instance.new(className)
+    for property, value in pairs(props or {}) do
+        local ok, err = pcall(function()
+            object[property] = value
+        end)
+        if not ok then
+            warn("[EMILY RECHAT] Property skipped:", property, err)
+        end
+    end
+    if parent then
+        object.Parent = parent
+    end
+    return object
+end
+
+local function Round(parent, radius)
+    return Create("UICorner", {CornerRadius = UDim.new(0, radius or 10)}, parent)
+end
+
+local function Outline(parent, color, thickness, transparency)
+    return Create("UIStroke", {
+        Color = color or State.Theme.Accent,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, parent)
+end
+
+local function AddPadding(parent, left, top, right, bottom)
+    return Create("UIPadding", {
+        PaddingLeft = UDim.new(0, left or 0),
+        PaddingTop = UDim.new(0, top or 0),
+        PaddingRight = UDim.new(0, right or 0),
+        PaddingBottom = UDim.new(0, bottom or 0),
+    }, parent)
+end
+
+local function AddList(parent, direction, padding, horizontalAlignment, verticalAlignment)
+    return Create("UIListLayout", {
+        FillDirection = direction or Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, padding or 0),
+        HorizontalAlignment = horizontalAlignment or Enum.HorizontalAlignment.Left,
+        VerticalAlignment = verticalAlignment or Enum.VerticalAlignment.Top,
+    }, parent)
+end
+
+local function AddGrid(parent, cellSize, cellPadding, fillDirectionMaxCells)
+    return Create("UIGridLayout", {
+        CellSize = cellSize,
+        CellPadding = cellPadding or UDim2.fromOffset(8, 8),
+        FillDirectionMaxCells = fillDirectionMaxCells or 4,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, parent)
+end
+
+local function Fade(instance, properties, duration, style, direction)
+    local tween = TweenService:Create(instance, TweenInfo.new(
+        duration or 0.2,
+        style or Enum.EasingStyle.Quad,
+        direction or Enum.EasingDirection.Out
+    ), properties)
+    tween:Play()
+    return tween
+end
+
+local function MakeLabel(parent, text, size, position, textSize, color, font)
+    return Create("TextLabel", {
+        BackgroundTransparency = 1,
+        Size = size or UDim2.new(1, 0, 0, 24),
+        Position = position or UDim2.new(),
+        Font = font or Enum.Font.Gotham,
+        Text = text or "",
+        TextColor3 = color or State.Theme.Text,
+        TextSize = textSize or 14,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        BorderSizePixel = 0,
+    }, parent)
+end
+
+local function MakeButton(parent, text, size, callback, options)
+    options = options or {}
+    local button = Create("TextButton", {
+        AutoButtonColor = false,
+        BackgroundColor3 = options.Background or State.Theme.Surface,
+        BackgroundTransparency = options.Transparency or 0,
+        BorderSizePixel = 0,
+        Size = size or UDim2.fromOffset(100, 34),
+        Font = options.Font or Enum.Font.GothamSemibold,
+        Text = text or "Button",
+        TextColor3 = options.TextColor or State.Theme.Text,
+        TextSize = options.TextSize or 12,
+        TextWrapped = true,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, parent)
+    Round(button, options.Radius or 9)
+    if options.Stroke then
+        Outline(button,
+            options.StrokeColor or State.Theme.Accent,
+            options.StrokeThickness or 1,
+            options.StrokeTransparency or 0.2)
+    end
+    button.MouseEnter:Connect(function()
+        if button.Parent then
+            Fade(button, {BackgroundColor3 = options.Hover or State.Theme.Accent}, 0.12)
+        end
+    end)
+    button.MouseLeave:Connect(function()
+        if button.Parent then
+            Fade(button, {BackgroundColor3 = options.Background or State.Theme.Surface}, 0.12)
+        end
+    end)
+    button.Activated:Connect(function()
+        if State.SoundEnabled then
+            -- No custom sound asset is required; the interface stays silent unless
+            -- the user later chooses a sound in Roblox's native settings.
+        end
+        if callback then
+            local ok, err = pcall(callback)
+            if not ok then
+                warn("[EMILY RECHAT] Button action failed:", err)
+            end
+        end
+    end)
+    return button
+end
+
+local function MakeTextBox(parent, placeholder, size, options)
+    options = options or {}
+    local box = Create("TextBox", {
+        BackgroundColor3 = options.Background or State.Theme.Surface,
+        BackgroundTransparency = options.Transparency or 0,
+        BorderSizePixel = 0,
+        Size = size or UDim2.new(1, 0, 0, 38),
+        ClearTextOnFocus = false,
+        Font = options.Font or Enum.Font.Gotham,
+        PlaceholderText = placeholder or "Type here...",
+        PlaceholderColor3 = State.Theme.Muted,
+        Text = options.Text or "",
+        TextColor3 = State.Theme.Text,
+        TextSize = options.TextSize or 13,
+        TextWrapped = options.Wrapped or false,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = options.TextYAlignment or Enum.TextYAlignment.Center,
+        MultiLine = options.MultiLine or false,
+        TextEditable = true,
+    }, parent)
+    Round(box, options.Radius or 9)
+    AddPadding(box,
+        options.PaddingLeft or 11,
+        options.PaddingTop or 5,
+        options.PaddingRight or 9,
+        options.PaddingBottom or 5)
+    if options.Stroke then
+        Outline(box, options.StrokeColor or State.Theme.Accent, 1, 0.45)
+    end
+    box.Focused:Connect(function()
+        Fade(box, {BackgroundColor3 = State.Theme.Panel}, 0.12)
+    end)
+    box.FocusLost:Connect(function()
+        Fade(box, {BackgroundColor3 = options.Background or State.Theme.Surface}, 0.12)
+    end)
+    return box
+end
+
+local function MakeCard(parent, size, options)
+    options = options or {}
+    local card = Create("Frame", {
+        BackgroundColor3 = options.Background or State.Theme.Panel,
+        BackgroundTransparency = options.Transparency or 0,
+        BorderSizePixel = 0,
+        Size = size or UDim2.new(1, 0, 0, 60),
+    }, parent)
+    Round(card, options.Radius or 12)
+    if options.Stroke ~= false then
+        Outline(card,
+            options.StrokeColor or State.Theme.Accent,
+            options.StrokeThickness or 1,
+            options.StrokeTransparency or 0.72)
+    end
+    return card
+end
+
+local function FormatClock(timestamp)
+    local date = os.date("!*t", timestamp or os.time())
+    local offset = os.difftime(os.time(), os.time(date))
+    local localDate = os.date("*t", timestamp or os.time())
+    return string.format("%02d:%02d", localDate.hour, localDate.min)
+end
+
+local function Truncate(text, limit)
+    text = tostring(text or "")
+    if #text > limit then
+        return string.sub(text, 1, limit - 1) .. "…"
+    end
+    return text
+end
+
+local function NormalizeKey(text)
+    return string.lower(tostring(text or "")):gsub("%s+", "")
+end
+
+local function IsTouchOnly()
+    return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+local function GetPlayerByName(fragment)
+    fragment = string.lower(tostring(fragment or ""))
+    if fragment == "" then
+        return nil
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if string.lower(player.Name) == fragment or string.lower(player.DisplayName) == fragment then
+            return player
+        end
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if string.find(string.lower(player.Name), fragment, 1, true)
+            or string.find(string.lower(player.DisplayName), fragment, 1, true) then
+            return player
+        end
+    end
+    return nil
+end
+
+--// GUI root ------------------------------------------------------------------
+local Gui = Create("ScreenGui", {
+    Name = "EMILY_RECHAT",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    DisplayOrder = 80,
+}, nil)
+
+local parentedToCoreGui = pcall(function()
+    Gui.Parent = CoreGui
+end)
+if not parentedToCoreGui or not Gui.Parent then
+    Gui.Parent = PlayerGui
+end
+
+local RootScale = Create("UIScale", {Scale = 1}, Gui)
+local UserScale = 1
+local Backdrop = Create("Frame", {
+    Name = "SoftBackdrop",
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Size = UDim2.fromScale(1, 1),
+    Visible = false,
+}, Gui)
+
+local MainWindow = Create("Frame", {
+    Name = "MainWindow",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(WINDOW_DESIGN_SIZE.X, WINDOW_DESIGN_SIZE.Y),
+    BackgroundColor3 = State.Theme.Bg,
+    BackgroundTransparency = 0.02,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+}, Gui)
+Round(MainWindow, 18)
+local MainStroke = Outline(MainWindow, State.Theme.Accent, 1.5, 0.08)
+local MainGradient = Create("UIGradient", {
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, State.Theme.Accent),
+        ColorSequenceKeypoint.new(0.55, State.Theme.Accent2),
+        ColorSequenceKeypoint.new(1, State.Theme.Accent),
+    }),
+    Rotation = 22,
+}, MainStroke)
+
+local WindowShadow = Create("ImageLabel", {
+    Name = "WindowShadow",
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://6014261993",
+    ImageColor3 = Color3.fromRGB(0, 0, 0),
+    ImageTransparency = 0.52,
+    ScaleType = Enum.ScaleType.Slice,
+    SliceCenter = Rect.new(49, 49, 450, 450),
+    Position = UDim2.new(0, -20, 0, -20),
+    Size = UDim2.new(1, 40, 1, 40),
+    ZIndex = 0,
+}, MainWindow)
+MainWindow.ZIndex = 1
+
+local TopBar = Create("Frame", {
+    Name = "TopBar",
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    Size = UDim2.new(1, 0, 0, 72),
+    ZIndex = 2,
+}, MainWindow)
+Round(TopBar, 18)
+local TopBarMask = Create("Frame", {
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    Position = UDim2.new(0, 0, 1, -18),
+    Size = UDim2.new(1, 0, 0, 18),
+    ZIndex = 2,
+}, TopBar)
+
+local Logo = Create("Frame", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(18, 14),
+    Size = UDim2.fromOffset(44, 44),
+    ZIndex = 3,
+}, TopBar)
+Round(Logo, 14)
+local LogoStroke = Outline(Logo, State.Theme.Accent, 1.4, 0.08)
+local LogoText = Create("TextLabel", {
+    BackgroundTransparency = 1,
+    Size = UDim2.fromScale(1, 1),
+    Font = Enum.Font.GothamBlack,
+    Text = "ER",
+    TextColor3 = State.Theme.Text,
+    TextSize = 16,
+    ZIndex = 4,
+}, Logo)
+
+local Title = MakeLabel(TopBar,
+    APP_NAME,
+    UDim2.new(0,
+    310,
+    0,
+    26),
+    UDim2.fromOffset(76,
+    12),
+    19,
+    State.Theme.Text,
+    Enum.Font.GothamBlack)
+Title.ZIndex = 3
+local Subtitle = MakeLabel(TopBar,
+    "CUSTOM CHAT EXPERIENCE  •  " .. APP_CREATOR,
+    UDim2.new(0,
+    390,
+    0,
+    18),
+    UDim2.fromOffset(77,
+    40),
+    9,
+    State.Theme.Muted,
+    Enum.Font.GothamSemibold)
+Subtitle.ZIndex = 3
+
+local StatusPill = Create("Frame", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -142, 0, 22),
+    Size = UDim2.fromOffset(98, 28),
+    ZIndex = 4,
+}, TopBar)
+Round(StatusPill, 10)
+local StatusDot = Create("Frame", {
+    BackgroundColor3 = Color3.fromRGB(70, 225, 132),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(10, 10),
+    Size = UDim2.fromOffset(8, 8),
+    ZIndex = 5,
+}, StatusPill)
+Round(StatusDot, 4)
+local StatusText = MakeLabel(StatusPill,
+    "READY",
+    UDim2.new(1,
+    -30,
+    1,
+    0),
+    UDim2.fromOffset(24,
+    0),
+    10,
+    State.Theme.Text,
+    Enum.Font.GothamBold)
+StatusText.ZIndex = 5
+
+local MinimizeButton = MakeButton(TopBar, "—", UDim2.fromOffset(34, 32), nil, {
+    Background = State.Theme.Surface, Hover = State.Theme.Accent, Radius = 9, TextSize = 16,
+})
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Position = UDim2.new(1, -84, 0, 20)
+MinimizeButton.ZIndex = 4
+local CloseButton = MakeButton(TopBar, "×", UDim2.fromOffset(34, 32), nil, {
+    Background = State.Theme.Surface,
+        Hover = Color3.fromRGB(213,
+        55,
+        90),
+        Radius = 9,
+        TextSize = 18,
+})
+CloseButton.Name = "CloseButton"
+CloseButton.Position = UDim2.new(1, -42, 0, 20)
+CloseButton.ZIndex = 4
+
+local Sidebar = Create("Frame", {
+    Name = "Sidebar",
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(12, 82),
+    Size = UDim2.new(0, 155, 1, -94),
+    ZIndex = 2,
+}, MainWindow)
+Round(Sidebar, 14)
+AddPadding(Sidebar, 8, 11, 8, 9)
+local SidebarTitle = MakeLabel(Sidebar,
+    "WORKSPACE",
+    UDim2.new(1,
+    -8,
+    0,
+    20),
+    UDim2.fromOffset(8,
+    0),
+    9,
+    State.Theme.Muted,
+    Enum.Font.GothamBold)
+local SidebarButtons = Create("Frame", {
+    Name = "SidebarButtons",
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(0, 30),
+    Size = UDim2.new(1, 0, 1, -82),
+}, Sidebar)
+local SidebarLayout = AddList(SidebarButtons, Enum.FillDirection.Vertical, 6)
+
+local SidebarFooter = Create("Frame", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 0, 1, -1),
+    Size = UDim2.new(1, 0, 0, 45),
+}, Sidebar)
+Round(SidebarFooter, 10)
+local FooterCreator = MakeLabel(SidebarFooter,
+    "Made by",
+    UDim2.new(1,
+    -12,
+    0,
+    14),
+    UDim2.fromOffset(9,
+    6),
+    9,
+    State.Theme.Muted)
+local FooterName = MakeLabel(SidebarFooter,
+    APP_CREATOR,
+    UDim2.new(1,
+    -12,
+    0,
+    17),
+    UDim2.fromOffset(9,
+    21),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+
+local Content = Create("Frame", {
+    Name = "Content",
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(178, 82),
+    Size = UDim2.new(1, -190, 1, -94),
+}, MainWindow)
+
+local PageTitle = MakeLabel(Content,
+    "CHAT",
+    UDim2.new(1,
+    -6,
+    0,
+    28),
+    UDim2.fromOffset(2,
+    0),
+    17,
+    State.Theme.Text,
+    Enum.Font.GothamBlack)
+local PageDescription = MakeLabel(Content,
+    "Your conversations, one clean workspace.",
+    UDim2.new(1,
+    -6,
+    0,
+    19),
+    UDim2.fromOffset(2,
+    27),
+    10,
+    State.Theme.Muted)
+
+local PageHolder = Create("Frame", {
+    Name = "PageHolder",
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(0, 52),
+    Size = UDim2.new(1, 0, 1, -52),
+    ClipsDescendants = true,
+}, Content)
+
+local Pages = {}
+local NavButtons = {}
+local ToastLayer = Create("Frame", {
+    Name = "ToastLayer",
+    BackgroundTransparency = 1,
+    Size = UDim2.fromScale(1, 1),
+    ZIndex = 100,
+}, Gui)
+local FloatingButton
+local Dragging = false
+local DragStart = nil
+local StartPosition = nil
+local CurrentDragInput = nil
+local ActiveConnections = {}
+local NotificationSerial = 0
+
+local function KeepConnection(connection)
+    table.insert(ActiveConnections, connection)
+    return connection
+end
+
+local function MakePage(name)
+    local page = Create("Frame", {
+        Name = name .. "Page",
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        Visible = false,
+        ClipsDescendants = true,
+    }, PageHolder)
+    Pages[name] = page
+    return page
+end
+
+--// Notifications --------------------------------------------------------------
+local function Notify(title, message, kind, duration)
+    if not State.ShowNotifications then
+        return
+    end
+    NotificationSerial += 1
+    local serial = NotificationSerial
+    local accent = State.Theme.Accent
+    if kind == "success" then
+        accent = Color3.fromRGB(74, 219, 139)
+    elseif kind == "warning" then
+        accent = Color3.fromRGB(255, 184, 75)
+    elseif kind == "error" then
+        accent = Color3.fromRGB(239, 81, 105)
+    end
+    local toast = Create("Frame", {
+        Name = "Toast_" .. tostring(serial),
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, 380, 0, 95 + ((serial % 4) * 82)),
+        Size = UDim2.fromOffset(300, 72),
+        BackgroundColor3 = State.Theme.Panel,
+        BackgroundTransparency = 0.02,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, ToastLayer)
+    Round(toast, 12)
+    Outline(toast, accent, 1.2, 0.08)
+    local bar = Create("Frame", {
+        BackgroundColor3 = accent,
+        BorderSizePixel = 0,
+        Position = UDim2.fromOffset(0, 12),
+        Size = UDim2.new(0, 3, 1, -24),
+        ZIndex = 103,
+    }, toast)
+    Round(bar, 2)
+    MakeLabel(toast,
+        Truncate(title,
+        42),
+        UDim2.new(1,
+        -25,
+        0,
+        23),
+        UDim2.fromOffset(14,
+        8),
+        12,
+        State.Theme.Text,
+        Enum.Font.GothamBold).ZIndex = 103
+    MakeLabel(toast,
+        Truncate(message,
+        115),
+        UDim2.new(1,
+        -25,
+        0,
+        30),
+        UDim2.fromOffset(14,
+        33),
+        10,
+        State.Theme.Muted).ZIndex = 103
+    Fade(toast,
+        {Position = UDim2.new(1,
+        -16,
+        0,
+        95 + ((serial % 4) * 82))},
+        0.24,
+        Enum.EasingStyle.Back)
+    task.delay(duration or 3.2, function()
+        if toast.Parent then
+            Fade(toast,
+                {Position = UDim2.new(1,
+                340,
+                0,
+                toast.Position.Y.Offset),
+                BackgroundTransparency = 1},
+                0.18)
+            task.delay(0.22, function()
+                SafeDestroy(toast)
+            end)
+        end
+    end)
+end
+
+--// Shared scroll-frame helper -------------------------------------------------
+local function MakeScroll(parent, name, position, size, options)
+    options = options or {}
+    local scroll = Create("ScrollingFrame", {
+        Name = name,
+        BackgroundColor3 = options.Background or State.Theme.Bg,
+        BackgroundTransparency = options.Transparency == nil and 0.12 or options.Transparency,
+        BorderSizePixel = 0,
+        Position = position or UDim2.new(),
+        Size = size or UDim2.fromScale(1, 1),
+        CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ScrollBarThickness = options.ScrollBarThickness or 4,
+        ScrollBarImageColor3 = State.Theme.Accent,
+        ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    }, parent)
+    Round(scroll, options.Radius or 10)
+    AddPadding(scroll,
+        options.PaddingLeft or 8,
+        options.PaddingTop or 8,
+        options.PaddingRight or 8,
+        options.PaddingBottom or 8)
+    local layout = AddList(scroll,
+        options.Direction or Enum.FillDirection.Vertical,
+        options.Padding or 7)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 18)
+    end)
+    return scroll, layout
+end
+
+--// Chat data and message renderer --------------------------------------------
+local ChatScroll
+local ChatLayout
+local Composer
+local SendButton
+local ChatSearch
+local ChatHeaderStatus
+local CurrentTabBadge
+local MessageEmptyState
+local DMTargetLabel
+local DMComposer
+local AIComposer
+local AITranscript
+local ProfileNameInput
+local ProfileBioInput
+local ThemeGridFrame
+local GalleryScroll
+local GallerySearch
+local SettingsScroll
+local PlayerListFrame
+local ChatMessageCounter
+local VoiceIndicator
+local LocalMessageRenderer
+local UpdateNavigation
+
+local function IsLocalAuthor(username)
+    return username == LocalPlayer.Name
+end
+
+local function SaveMessage(data)
+    table.insert(State.MessageHistory, data)
+    if #State.MessageHistory > MAX_STORED_MESSAGES then
+        table.remove(State.MessageHistory, 1)
+    end
+end
+
+local function MatchesMessageSearch(data)
+    local query = string.lower(State.SearchText or "")
+    if query == "" then
+        return true
+    end
+    return string.find(string.lower(data.Text or ""), query, 1, true) ~= nil
+        or string.find(string.lower(data.Username or ""), query, 1, true) ~= nil
+        or string.find(string.lower(data.DisplayName or ""), query, 1, true) ~= nil
+end
+
+local function ScrollChatToBottom()
+    if not ChatScroll then
+        return
+    end
+    task.defer(function()
+        if ChatScroll and ChatScroll.Parent then
+            ChatScroll.CanvasPosition = Vector2.new(0,
+                math.max(0,
+                ChatScroll.AbsoluteCanvasSize.Y - ChatScroll.AbsoluteSize.Y))
+        end
+    end)
+end
+
+local function RebuildChatView()
+    if not ChatScroll then
+        return
+    end
+    for _, child in ipairs(ChatScroll:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+    State.MessageObjects = {}
+    local shown = 0
+    for _, data in ipairs(State.MessageHistory) do
+        if MatchesMessageSearch(data) then
+            shown += 1
+            if shown > MAX_VISIBLE_MESSAGES then
+                break
+            end
+            if LocalMessageRenderer then
+                LocalMessageRenderer(data, false)
+            end
+        end
+    end
+    if MessageEmptyState then
+        MessageEmptyState.Visible = shown == 0
+    end
+    ScrollChatToBottom()
+end
+
+local function CreateMessageCard(data, attachToScroll)
+    if not ChatScroll then
+        return nil
+    end
+    local isLocal = IsLocalAuthor(data.Username)
+    local parent = attachToScroll and ChatScroll or nil
+    if not parent then
+        return nil
+    end
+    local theme = State.Theme
+    local card = Create("Frame", {
+        Name = "Message_" .. tostring(data.Id or 0),
+        BackgroundColor3 = isLocal and theme.Surface or theme.Panel,
+        BackgroundTransparency = State.CompactMessages and 0.08 or 0.02,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -2, 0, 72),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        LayoutOrder = data.Id or 0,
+    }, parent)
+    Round(card, State.CompactMessages and 8 or 11)
+    Outline(card, isLocal and theme.Accent or theme.Surface, 1, isLocal and 0.68 or 0.84)
+    AddPadding(card, 11, State.CompactMessages and 6 or 8, 10, State.CompactMessages and 6 or 8)
+    local cardLayout = AddList(card, Enum.FillDirection.Vertical, 4)
+    cardLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+
+    local nameRow = Create("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 19),
+        LayoutOrder = 1,
+    }, card)
+    local usernameText = isLocal and State.RPName or (data.DisplayName and data.DisplayName ~= "" and data.DisplayName or data.Username)
+    local author = MakeLabel(nameRow,
+        Truncate(usernameText,
+        26),
+        UDim2.new(0.66,
+        -3,
+        1,
+        0),
+        UDim2.new(),
+        11,
+        isLocal and theme.Accent2 or theme.Text,
+        Enum.Font.GothamBold)
+    author.TextTruncate = Enum.TextTruncate.AtEnd
+    local handle = MakeLabel(nameRow,
+        "@" .. Truncate(data.Username or "Unknown",
+        20),
+        UDim2.new(0.42,
+        -2,
+        1,
+        0),
+        UDim2.new(0.58,
+        0,
+        0,
+        0),
+        9,
+        theme.Muted,
+        Enum.Font.Gotham)
+    handle.TextXAlignment = Enum.TextXAlignment.Right
+    if State.Timestamps then
+        local time = MakeLabel(nameRow,
+            data.TimeText or FormatClock(data.Timestamp),
+            UDim2.new(0,
+            44,
+            1,
+            0),
+            UDim2.new(1,
+            -44,
+            0,
+            0),
+            9,
+            theme.Muted)
+        time.TextXAlignment = Enum.TextXAlignment.Right
+        handle.Size = UDim2.new(0.33, -2, 1, 0)
+        handle.Position = UDim2.new(0.57, 0, 0, 0)
+    end
+
+    local body = MakeLabel(card,
+        tostring(data.Text or ""),
+        UDim2.new(1,
+        0,
+        0,
+        0),
+        UDim2.new(),
+        12,
+        theme.Text,
+        Enum.Font.Gotham)
+    body.Name = "MessageText"
+    body.LayoutOrder = 2
+    body.AutomaticSize = Enum.AutomaticSize.Y
+    body.TextWrapped = true
+    body.TextXAlignment = Enum.TextXAlignment.Left
+    body.TextYAlignment = Enum.TextYAlignment.Top
+    body.TextTruncate = Enum.TextTruncate.None
+    body.TextSelectable = true
+    body.Size = UDim2.new(1, 0, 0, 0)
+    body.AutomaticSize = Enum.AutomaticSize.Y
+    if data.Kind == "system" then
+        body.TextColor3 = theme.Accent2
+        body.Font = Enum.Font.GothamMedium
+    elseif data.Kind == "ai" then
+        body.TextColor3 = theme.Accent2
+    elseif data.Kind == "action" then
+        body.TextColor3 = theme.Muted
+        body.Font = Enum.Font.GothamItalic
+    end
+
+    local footer = Create("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 24),
+        Visible = data.Kind ~= "system",
+        LayoutOrder = 3,
+    }, card)
+    local footerLayout = AddList(footer, Enum.FillDirection.Horizontal, 5)
+    footerLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    MakeButton(footer, "↩ Reply", UDim2.fromOffset(62, 22), function()
+        if Composer then
+            Composer.Text = "@" .. tostring(data.Username or "") .. " "
+            Composer:CaptureFocus()
+            Composer.CursorPosition = #Composer.Text + 1
+        end
+    end, {Background = theme.Bg, Hover = theme.Accent, TextSize = 9, Radius = 7})
+    MakeButton(footer, "♡ React", UDim2.fromOffset(66, 22), function()
+        if Composer then
+            Composer.Text = Composer.Text .. " 💗"
+            Composer:CaptureFocus()
+        end
+    end, {Background = theme.Bg, Hover = theme.Accent, TextSize = 9, Radius = 7})
+    MakeButton(footer, "⋯", UDim2.fromOffset(28, 22), function()
+        Notify("Message options",
+            "Use Reply for a safe quick reply. Clipboard actions depend on Roblox platform support.",
+            "info",
+            3)
+    end, {Background = theme.Bg, Hover = theme.Accent, TextSize = 12, Radius = 7})
+
+    State.MessageObjects[data.Id or #State.MessageObjects + 1] = card
+    return card
+end
+
+LocalMessageRenderer = function(data)
+    CreateMessageCard(data, true)
+end
+
+local function AddMessage(username, displayName, text, kind, extra)
+    extra = extra or {}
+    local record = {
+        Id = State.MessageCount + 1,
+        Username = username or "System",
+        DisplayName = displayName or username or "System",
+        Text = tostring(text or ""),
+        Kind = kind or "chat",
+        Timestamp = os.time(),
+        TimeText = FormatClock(os.time()),
+        Channel = extra.Channel or "RBXGeneral",
+        UserId = extra.UserId,
+        IsLocal = username == LocalPlayer.Name,
+    }
+    State.MessageCount += 1
+    record.Id = State.MessageCount
+    SaveMessage(record)
+    if #State.MessageHistory <= MAX_VISIBLE_MESSAGES and ChatScroll and (State.SearchText == "" or MatchesMessageSearch(record)) then
+        LocalMessageRenderer(record)
+        MessageEmptyState.Visible = false
+        ScrollChatToBottom()
+    else
+        RebuildChatView()
+    end
+    if ChatMessageCounter then
+        ChatMessageCounter.Text = tostring(State.MessageCount) .. " messages"
+    end
+    if not IsLocalAuthor(record.Username) and kind ~= "system" and State.ActiveTab ~= "CHAT" and State.ActiveTab ~= "DM" then
+        State.Unread += 1
+        if CurrentTabBadge then
+            CurrentTabBadge.Text = tostring(State.Unread)
+            CurrentTabBadge.Visible = State.Unread > 0
+        end
+    end
+    return record
+end
+
+local function AddSystemMessage(text, kind)
+    return AddMessage("System", "EMILY RECHAT", text, kind or "system")
+end
+
+--// Composer / sending ---------------------------------------------------------
+local function GetGeneralChannel()
+    local channels = TextChatService:FindFirstChild("TextChannels")
+    if not channels then
+        return nil
+    end
+    return channels:FindFirstChild("RBXGeneral") or channels:FindFirstChildWhichIsA("TextChannel")
+end
+
+local function IsTextChatReady()
+    return TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+end
+
+local function SendToRobloxChat(text, targetName)
+    text = tostring(text or "")
+    if text:gsub("%s", "") == "" then
+        return false, "Write a message first."
+    end
+    if #text > MAX_MESSAGE_LENGTH then
+        return false,
+            "Message is too long. Limit: " .. tostring(MAX_MESSAGE_LENGTH) .. " characters."
+    end
+    local now = os.clock()
+    if State.SendPending then
+        return false, "A message is already being sent."
+    end
+    local remaining = SEND_COOLDOWN - (now - State.LastSendAt)
+    if remaining > 0 then
+        return false, string.format("Please wait %.1fs before sending again.", remaining)
+    end
+    if not IsTextChatReady() then
+        return false, "This experience is using legacy chat. Use Roblox's native chat controls."
+    end
+    local channel = GetGeneralChannel()
+    if not channel then
+        return false, "The default chat channel is not ready yet."
+    end
+    local outgoing = text
+    if targetName and targetName ~= "" then
+        -- This uses TextChatService's native whisper command path. The experience
+        -- still applies its own chat permissions and filtering rules.
+        outgoing = "/w " .. targetName .. " " .. text
+    end
+    State.SendPending = true
+    State.LastSendAt = now
+    local ok, err = pcall(function()
+        channel:SendAsync(outgoing)
+    end)
+    task.delay(SEND_COOLDOWN, function()
+        State.SendPending = false
+    end)
+    if not ok then
+        State.SendPending = false
+        return false, "Roblox chat did not accept the message: " .. tostring(err)
+    end
+    return true
+end
+
+local function SendComposerMessage(textOverride)
+    local text = textOverride
+    if text == nil and Composer then
+        text = Composer.Text
+    end
+    text = tostring(text or "")
+    if text:gsub("%s", "") == "" then
+        return
+    end
+
+    local first, remainder = string.match(text, "^/(%S+)%s*(.*)$")
+    if first then
+        local command = string.lower(first)
+        if command == "clear" then
+            State.MessageHistory = {}
+            State.MessageObjects = {}
+            State.MessageCount = 0
+            RebuildChatView()
+            AddSystemMessage("Chat panel cleared locally.")
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "help" then
+            Notify("Command help",
+                "/ai, /clear, /nick, /bio, /theme, /mute, /unmute, /reply",
+                "info",
+                5)
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "ai" then
+            if Composer then Composer.Text = "" end
+            if UpdateNavigation then
+                UpdateNavigation("AI")
+            end
+            return
+        elseif command == "nick" then
+            if remainder and remainder ~= "" then
+                State.RPName = Truncate(remainder, 30)
+                if ProfileNameInput then ProfileNameInput.Text = State.RPName end
+                RebuildChatView()
+                AddSystemMessage("Local profile name updated. This does not change your Roblox username.")
+            else
+                Notify("Profile name", "Usage: /nick Your RP Name", "warning")
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "bio" then
+            if remainder and remainder ~= "" then
+                State.Bio = Truncate(remainder, 90)
+                if ProfileBioInput then ProfileBioInput.Text = State.Bio end
+                AddSystemMessage("Local profile bio updated.")
+            else
+                Notify("Profile bio", "Usage: /bio your bio", "warning")
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "theme" then
+            if remainder and remainder ~= "" then
+                local search = string.lower(remainder)
+                local found = nil
+                for i, theme in ipairs(Themes) do
+                    if string.lower(theme.Name) == search or string.find(string.lower(theme.Name),
+                        search,
+                        1,
+                        true) then
+                        found = i
+                        break
+                    end
+                end
+                if found then
+                    State.ThemeIndex = found
+                    State.Theme = Themes[found]
+                    -- ApplyTheme is defined after the theme controller is built.
+                    if _G.__EMILY_RECHAT_APPLY_THEME then
+                        _G.__EMILY_RECHAT_APPLY_THEME(found)
+                    end
+                    AddSystemMessage("Theme changed to " .. Themes[found].Name .. ".")
+                else
+                    Notify("Theme not found",
+                        "Open THEME to browse the available palettes.",
+                        "warning")
+                end
+            else
+                if UpdateNavigation then
+                    UpdateNavigation("THEME")
+                end
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "mute" then
+            local target = GetPlayerByName(remainder)
+            if target then
+                State.IgnoredUsers[target.Name] = true
+                AddSystemMessage("Messages from @" .. target.Name .. " will be hidden in this panel.")
+            else
+                Notify("Mute user", "Usage: /mute username", "warning")
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "unmute" then
+            local target = GetPlayerByName(remainder)
+            local key = target and target.Name or remainder
+            if key and key ~= "" then
+                State.IgnoredUsers[key] = nil
+                AddSystemMessage("Local mute removed for " .. key .. ".")
+            else
+                Notify("Unmute user", "Usage: /unmute username", "warning")
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "reply" then
+            local target = GetPlayerByName(remainder)
+            if target and Composer then
+                Composer.Text = "@" .. target.Name .. " "
+                Composer:CaptureFocus()
+                Composer.CursorPosition = #Composer.Text + 1
+            else
+                Notify("Reply", "Usage: /reply username", "warning")
+            end
+            return
+        elseif command == "sticker" then
+            if UpdateNavigation then
+                UpdateNavigation("GALLERY")
+            end
+            if Composer then Composer.Text = "" end
+            return
+        elseif command == "me" then
+            if remainder and remainder ~= "" then
+                AddMessage(LocalPlayer.Name,
+                    State.RPName,
+                    "* " .. State.RPName .. " " .. remainder,
+                    "action")
+                if Composer then Composer.Text = "" end
+            else
+                Notify("Action", "Usage: /me waves", "warning")
+            end
+            return
+        end
+    end
+
+    local ok, errorMessage = SendToRobloxChat(text)
+    if ok then
+        if Composer then
+            Composer.Text = ""
+            Composer:ReleaseFocus()
+        end
+        Notify("Message queued", "Sent through the Roblox chat service.", "success", 1.8)
+    else
+        Notify("Couldn't send", errorMessage, "warning", 3.2)
+    end
+end
+
+--// Build CHAT page ------------------------------------------------------------
+local ChatPage = MakePage("CHAT")
+local ChatToolbar = Create("Frame", {
+    Name = "ChatToolbar",
+    BackgroundTransparency = 1,
+    Size = UDim2.new(1, 0, 0, 42),
+}, ChatPage)
+local ChannelTag = Create("Frame", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(0, 3),
+    Size = UDim2.fromOffset(115, 30),
+}, ChatToolbar)
+Round(ChannelTag, 9)
+MakeLabel(ChannelTag,
+    "#  GENERAL",
+    UDim2.new(1,
+    -12,
+    1,
+    0),
+    UDim2.fromOffset(9,
+    0),
+    10,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+ChatHeaderStatus = MakeLabel(ChatToolbar,
+    "Roblox chat",
+    UDim2.new(0,
+    100,
+    1,
+    0),
+    UDim2.fromOffset(123,
+    0),
+    10,
+    State.Theme.Muted)
+ChatHeaderStatus.TextXAlignment = Enum.TextXAlignment.Left
+ChatSearch = MakeTextBox(ChatToolbar,
+    "Search messages...",
+    UDim2.new(0.45,
+    -8,
+    0,
+    30),
+    {Background = State.Theme.Surface,
+    TextSize = 11,
+    Radius = 9,
+    PaddingLeft = 10})
+ChatSearch.AnchorPoint = Vector2.new(1, 0)
+ChatSearch.Position = UDim2.new(1, 0, 0, 3)
+
+local ChatPanel = Create("Frame", {
+    Name = "ChatPanel",
+    BackgroundColor3 = State.Theme.Bg,
+    BackgroundTransparency = 0.08,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(0, 43),
+    Size = UDim2.new(1, 0, 1, -111),
+}, ChatPage)
+Round(ChatPanel, 12)
+ChatScroll,
+    ChatLayout = MakeScroll(ChatPanel,
+    "Messages",
+    UDim2.fromOffset(0,
+    0),
+    UDim2.fromScale(1,
+    1),
+    {
+    Background = State.Theme.Bg, Transparency = 0.1, Radius = 12, PaddingLeft = 9, PaddingTop = 9,
+    PaddingRight = 9, PaddingBottom = 9, Padding = State.CompactMessages and 4 or 7,
+})
+MessageEmptyState = MakeLabel(ChatPanel,
+    "No messages here yet. Start a conversation ✨",
+    UDim2.new(1,
+    -30,
+    0,
+    38),
+    UDim2.new(0,
+    15,
+    0.5,
+    -19),
+    12,
+    State.Theme.Muted)
+MessageEmptyState.TextXAlignment = Enum.TextXAlignment.Center
+MessageEmptyState.ZIndex = 3
+
+local ComposerBar = Create("Frame", {
+    Name = "ComposerBar",
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 0, 1, 0),
+    Size = UDim2.new(1, 0, 0, 59),
+}, ChatPage)
+Round(ComposerBar, 12)
+Outline(ComposerBar, State.Theme.Surface, 1, 0.25)
+local StickerButton = MakeButton(ComposerBar, "☺", UDim2.fromOffset(34, 36), function()
+    State.ActiveTab = "GALLERY"
+    for name, page in pairs(Pages) do page.Visible = name == "GALLERY" end
+    UpdateNavigation("GALLERY")
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 19, Radius = 9})
+StickerButton.Position = UDim2.fromOffset(9, 11)
+local QuickReplyButton = MakeButton(ComposerBar, "↯", UDim2.fromOffset(34, 36), function()
+    local reply = QuickReplies[math.random(1, #QuickReplies)]
+    if Composer then
+        Composer.Text = (Composer.Text or "") .. reply
+        Composer:CaptureFocus()
+        Composer.CursorPosition = #Composer.Text + 1
+    end
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 16, Radius = 9})
+QuickReplyButton.Position = UDim2.fromOffset(49, 11)
+Composer = MakeTextBox(ComposerBar,
+    "Write a message...  /help for commands",
+    UDim2.new(1,
+    -180,
+    0,
+    38),
+    {
+    Background = State.Theme.Surface, Radius = 10, TextSize = 12, PaddingLeft = 12, Stroke = true,
+})
+Composer.Position = UDim2.fromOffset(91, 10)
+SendButton = MakeButton(ComposerBar, "SEND  ➤", UDim2.fromOffset(77, 38), function()
+    SendComposerMessage()
+end,
+    {Background = State.Theme.Accent,
+    Hover = State.Theme.Accent2,
+    TextSize = 10,
+    Radius = 10,
+    TextColor = Color3.fromRGB(255,
+    255,
+    255)})
+SendButton.Position = UDim2.new(1, -86, 0, 10)
+
+local ChatMetaBar = Create("Frame", {
+    BackgroundTransparency = 1,
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 0, 1, -64),
+    Size = UDim2.new(1, 0, 0, 20),
+}, ChatPage)
+ChatMessageCounter = MakeLabel(ChatMetaBar,
+    "0 messages",
+    UDim2.new(0.5,
+    0,
+    1,
+    0),
+    UDim2.new(),
+    9,
+    State.Theme.Muted)
+ChatMessageCounter.TextXAlignment = Enum.TextXAlignment.Left
+local ChatSafetyText = MakeLabel(ChatMetaBar,
+    "Messages use Roblox chat moderation",
+    UDim2.new(0.5,
+    0,
+    1,
+    0),
+    UDim2.new(0.5,
+    0,
+    0,
+    0),
+    9,
+    State.Theme.Muted)
+ChatSafetyText.TextXAlignment = Enum.TextXAlignment.Right
+
+ChatSearch:GetPropertyChangedSignal("Text"):Connect(function()
+    State.SearchText = ChatSearch.Text
+    RebuildChatView()
+end)
+
+Composer.FocusLost:Connect(function(enterPressed)
+    if enterPressed and State.EnterToSend then
+        SendComposerMessage()
+    end
+end)
+
+--// Build DM page --------------------------------------------------------------
+local DMPage = MakePage("DM")
+local DMHeader = MakeCard(DMPage, UDim2.new(1, 0, 0, 68), {Radius = 12})
+MakeLabel(DMHeader,
+    "DIRECT MESSAGE",
+    UDim2.new(1,
+    -24,
+    0,
+    18),
+    UDim2.fromOffset(12,
+    8),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+DMTargetLabel = MakeLabel(DMHeader,
+    "Choose a player to start a native whisper.",
+    UDim2.new(1,
+    -24,
+    0,
+    24),
+    UDim2.fromOffset(12,
+    31),
+    10,
+    State.Theme.Muted)
+local DMSearch = MakeTextBox(DMPage,
+    "Find a player by username or display name...",
+    UDim2.new(1,
+    0,
+    0,
+    34),
+    {Background = State.Theme.Surface,
+    TextSize = 11,
+    Radius = 9})
+DMSearch.Position = UDim2.fromOffset(0, 78)
+local DMPlayerScroll,
+    DMPlayerLayout = MakeScroll(DMPage,
+    "DMPlayerList",
+    UDim2.fromOffset(0,
+    121),
+    UDim2.new(1,
+    0,
+    0,
+    170),
+    {Background = State.Theme.Bg,
+    Radius = 10,
+    Padding = 5,
+    PaddingLeft = 7,
+    PaddingTop = 7,
+    PaddingRight = 7})
+local DMComposerBar = Create("Frame", {
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    Position = UDim2.new(0, 0, 1, -52),
+    Size = UDim2.new(1, 0, 0, 50),
+}, DMPage)
+Round(DMComposerBar, 10)
+DMComposer = MakeTextBox(DMComposerBar,
+    "Whisper message...",
+    UDim2.new(1,
+    -90,
+    0,
+    34),
+    {Background = State.Theme.Surface,
+    TextSize = 11,
+    Radius = 8})
+DMComposer.Position = UDim2.fromOffset(8, 8)
+local DMSend = MakeButton(DMComposerBar, "SEND", UDim2.fromOffset(70, 34), function()
+    if not State.SelectedDM then
+        Notify("Choose a player", "Select a player from the list first.", "warning")
+        return
+    end
+    local text = DMComposer.Text
+    if text == "" then return end
+    local ok, err = SendToRobloxChat(text, State.SelectedDM.Name)
+    if ok then
+        DMComposer.Text = ""
+        Notify("Whisper queued", "Sent to Roblox's native whisper command path.", "success", 2)
+    else
+        Notify("Whisper unavailable", err, "warning")
+    end
+end, {Background = State.Theme.Accent, Hover = State.Theme.Accent2, TextSize = 10, Radius = 8})
+DMSend.Position = UDim2.new(1, -78, 0, 8)
+local DMHint = MakeLabel(DMPage,
+    "Note: private messaging depends on this experience's TextChatService configuration.",
+    UDim2.new(1,
+    0,
+    0,
+    30),
+    UDim2.new(0,
+    0,
+    1,
+    -84),
+    9,
+    State.Theme.Muted)
+DMHint.TextYAlignment = Enum.TextYAlignment.Bottom
+
+local function RebuildDMPlayers(filterText)
+    for _, child in ipairs(DMPlayerScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    local filter = string.lower(filterText or "")
+    local count = 0
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= LocalPlayer then
+            local nameLine = string.lower(target.Name .. " " .. target.DisplayName)
+            if filter == "" or string.find(nameLine, filter, 1, true) then
+                count += 1
+                local row = Create("Frame", {
+                    BackgroundColor3 = State.SelectedDM == target and State.Theme.Surface or State.Theme.Panel,
+                    BorderSizePixel = 0,
+                    Size = UDim2.new(1, -2, 0, 40),
+                    LayoutOrder = count,
+                }, DMPlayerScroll)
+                Round(row, 8)
+                local avatar = Create("ImageLabel", {
+                    BackgroundColor3 = State.Theme.Surface,
+                    BorderSizePixel = 0,
+                    Position = UDim2.fromOffset(5, 4),
+                    Size = UDim2.fromOffset(32, 32),
+                    Image = "",
+                }, row)
+                Round(avatar, 16)
+                task.spawn(function()
+                    local ok, image = pcall(function()
+                        return Players:GetUserThumbnailAsync(target.UserId,
+                            Enum.ThumbnailType.HeadShot,
+                            Enum.ThumbnailSize.Size48x48)
+                    end)
+                    if ok and avatar.Parent then avatar.Image = image end
+                end)
+                MakeLabel(row,
+                    target.DisplayName,
+                    UDim2.new(1,
+                    -125,
+                    0,
+                    18),
+                    UDim2.fromOffset(44,
+                    4),
+                    10,
+                    State.Theme.Text,
+                    Enum.Font.GothamBold)
+                MakeLabel(row,
+                    "@" .. target.Name,
+                    UDim2.new(1,
+                    -125,
+                    0,
+                    14),
+                    UDim2.fromOffset(44,
+                    21),
+                    9,
+                    State.Theme.Muted)
+                local choose = MakeButton(row,
+                    State.SelectedDM == target and "SELECTED" or "WHISPER",
+                    UDim2.fromOffset(76,
+                    28),
+                    function()
+                    State.SelectedDM = target
+                    DMTargetLabel.Text = "Selected: " .. target.DisplayName .. "  (@" .. target.Name .. ")"
+                    RebuildDMPlayers(DMSearch.Text)
+                end,
+                    {Background = State.Theme.Surface,
+                    Hover = State.Theme.Accent,
+                    TextSize = 8,
+                    Radius = 8})
+                choose.Position = UDim2.new(1, -81, 0, 6)
+            end
+        end
+    end
+    if count == 0 then
+        local empty = MakeLabel(DMPlayerScroll,
+            "No matching players found.",
+            UDim2.new(1,
+            -8,
+            0,
+            32),
+            UDim2.new(),
+            10,
+            State.Theme.Muted)
+        empty.TextXAlignment = Enum.TextXAlignment.Center
+    end
+end
+DMSearch:GetPropertyChangedSignal("Text"):Connect(function()
+    RebuildDMPlayers(DMSearch.Text)
+end)
+RebuildDMPlayers("")
+
+--// Build local AI page ---------------------------------------------------------
+local AIPage = MakePage("AI")
+local AIWelcome = MakeCard(AIPage, UDim2.new(1, 0, 0, 84), {Radius = 12})
+MakeLabel(AIWelcome,
+    "FC AI  •  LOCAL ASSISTANT",
+    UDim2.new(1,
+    -24,
+    0,
+    18),
+    UDim2.fromOffset(12,
+    10),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(AIWelcome,
+    "A small offline helper for chat ideas, commands, and writing prompts. It does not use an API.",
+    UDim2.new(1,
+    -24,
+    0,
+    41),
+    UDim2.fromOffset(12,
+    32),
+    10,
+    State.Theme.Muted)
+AITranscript = MakeScroll(AIPage,
+    "AITranscript",
+    UDim2.fromOffset(0,
+    92),
+    UDim2.new(1,
+    0,
+    1,
+    -146),
+    {Background = State.Theme.Bg,
+    Radius = 11,
+    Padding = 9})
+local AIComposerBar = Create("Frame", {
+    BackgroundColor3 = State.Theme.Panel,
+    BorderSizePixel = 0,
+    AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 0, 1, 0),
+    Size = UDim2.new(1, 0, 0, 45),
+}, AIPage)
+Round(AIComposerBar, 10)
+AIComposer = MakeTextBox(AIComposerBar,
+    "Ask FC AI for a chat idea...",
+    UDim2.new(1,
+    -86,
+    0,
+    31),
+    {Background = State.Theme.Surface,
+    TextSize = 11,
+    Radius = 8})
+AIComposer.Position = UDim2.fromOffset(7, 7)
+local AISend = MakeButton(AIComposerBar,
+    "ASK",
+    UDim2.fromOffset(69,
+    31),
+    nil,
+    {Background = State.Theme.Accent,
+    Hover = State.Theme.Accent2,
+    TextSize = 10,
+    Radius = 8})
+AISend.Position = UDim2.new(1, -76, 0, 7)
+
+local AIQuickPrompts = {
+    "Give me a friendly greeting", "Make this sound polite", "Suggest a roleplay scene",
+    "Give me a conversation starter", "Explain the /help commands", "Suggest an emoji combo",
+}
+local AIFallbacks = {
+    Greeting = {"Try: 'Hey! How's your day going? 👋'", "Try: 'Hii, nice to meet you! 🌸'"},
+    Polite = {"Try a calm opener, say what you need clearly, and add a thank-you at the end.",
+        "A friendly version: 'Could you help me with this when you have a moment? Thanks!'"},
+    Roleplay = {"Scene idea: two friends meet at a cosy café during a rainy afternoon.",
+        "Scene idea: a mysterious gift arrives with a tiny note and a map."},
+    Starter = {"Ask about their avatar, favourite game mode, or what they are doing in the server.",
+        "Try: 'What's one game you could play for hours?'"},
+    Emoji = {"🎀🌸✨💗", "🌙⭐🫧💜", "🎮⚡🔥🏆", "🧸🍓💌🌷"},
+    General = {"I can help brainstorm greetings, polite rewrites, roleplay scenes, and chat commands.",
+        "Try asking for a greeting, a rewrite, a roleplay scene, or an emoji combo."},
+}
+
+local function AIResponse(prompt)
+    local text = string.lower(tostring(prompt or ""))
+    if string.find(text,
+        "hello",
+        1,
+        true) or string.find(text,
+        "greeting",
+        1,
+        true) or string.find(text,
+        "hi ",
+        1,
+        true) then
+        return AIFallbacks.Greeting[math.random(1, #AIFallbacks.Greeting)]
+    elseif string.find(text,
+        "polite",
+        1,
+        true) or string.find(text,
+        "rewrite",
+        1,
+        true) or string.find(text,
+        "formal",
+        1,
+        true) then
+        return AIFallbacks.Polite[math.random(1, #AIFallbacks.Polite)]
+    elseif string.find(text,
+        "roleplay",
+        1,
+        true) or string.find(text,
+        "scene",
+        1,
+        true) or string.find(text,
+        "rp ",
+        1,
+        true) then
+        return AIFallbacks.Roleplay[math.random(1, #AIFallbacks.Roleplay)]
+    elseif string.find(text, "starter", 1, true) or string.find(text, "conversation", 1, true) then
+        return AIFallbacks.Starter[math.random(1, #AIFallbacks.Starter)]
+    elseif string.find(text, "emoji", 1, true) or string.find(text, "sticker", 1, true) then
+        return AIFallbacks.Emoji[math.random(1, #AIFallbacks.Emoji)]
+    elseif string.find(text, "command", 1, true) or string.find(text, "/help", 1, true) then
+        return "Commands: /help, /clear, /ai, /nick NAME, /bio TEXT, /theme NAME, /mute USER, /unmute USER, /reply USER, /sticker, /me ACTION."
+    elseif string.find(text, "your name", 1, true) or string.find(text, "who are you", 1, true) then
+        return "I'm FC AI, the local helper inside EMILY RECHAT. I work offline and don't send prompts to an API."
+    end
+    return AIFallbacks.General[math.random(1, #AIFallbacks.General)]
+end
+
+local function AddAIMessage(who, text, isUser)
+    local bubble = Create("Frame", {
+        BackgroundColor3 = isUser and State.Theme.Surface or State.Theme.Panel,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -3, 0, 56),
+        AutomaticSize = Enum.AutomaticSize.Y,
+    }, AITranscript)
+    Round(bubble, 10)
+    AddPadding(bubble, 10, 8, 10, 8)
+    local layout = AddList(bubble, Enum.FillDirection.Vertical, 4)
+    MakeLabel(bubble,
+        who,
+        UDim2.new(1,
+        0,
+        0,
+        16),
+        UDim2.new(),
+        10,
+        isUser and State.Theme.Accent2 or State.Theme.Accent,
+        Enum.Font.GothamBold)
+    local message = MakeLabel(bubble,
+        text,
+        UDim2.new(1,
+        0,
+        0,
+        0),
+        UDim2.new(),
+        11,
+        State.Theme.Text)
+    message.AutomaticSize = Enum.AutomaticSize.Y
+    message.TextYAlignment = Enum.TextYAlignment.Top
+    bubble.LayoutOrder = #AITranscript:GetChildren()
+    task.defer(function()
+        if AITranscript.Parent then
+            AITranscript.CanvasPosition = Vector2.new(0,
+                math.max(0,
+                AITranscript.AbsoluteCanvasSize.Y - AITranscript.AbsoluteSize.Y))
+        end
+    end)
+end
+
+local function AskAI()
+    local prompt = AIComposer.Text
+    if prompt:gsub("%s", "") == "" then return end
+    AIComposer.Text = ""
+    AddAIMessage("YOU", prompt, true)
+    task.delay(0.18, function()
+        if AITranscript.Parent then
+            AddAIMessage("FC AI  •  LOCAL", AIResponse(prompt), false)
+        end
+    end)
+end
+AISend.Activated:Connect(AskAI)
+AIComposer.FocusLost:Connect(function(enterPressed)
+    if enterPressed then AskAI() end
+end)
+
+local AIQuickPanel = Create("Frame", {
+    BackgroundTransparency = 1,
+    AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -8, 0, 92),
+    Size = UDim2.new(0, 154, 1, -146),
+    Visible = false,
+}, AIPage)
+-- The prompts are also listed on the Commands page; hide this narrow side panel
+-- on compact screens to keep the assistant transcript readable.
+for index, prompt in ipairs(AIQuickPrompts) do
+    local button = MakeButton(AIQuickPanel, prompt, UDim2.new(1, 0, 0, 34), function()
+        AIComposer.Text = prompt
+        AskAI()
+    end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 9, Radius = 8})
+    button.Position = UDim2.fromOffset(0, (index - 1) * 40)
+end
+
+--// Build THEME page ------------------------------------------------------------
+local ThemePage = MakePage("THEME")
+local ThemeIntro = MakeCard(ThemePage, UDim2.new(1, 0, 0, 65), {Radius = 12})
+MakeLabel(ThemeIntro,
+    "MAKE IT YOURS",
+    UDim2.new(1,
+    -22,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    7),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(ThemeIntro,
+    "Choose a palette. Every card preview shows the accent and surface colours.",
+    UDim2.new(1,
+    -22,
+    0,
+    28),
+    UDim2.fromOffset(11,
+    28),
+    10,
+    State.Theme.Muted)
+local ThemeSearch = MakeTextBox(ThemePage,
+    "Search themes...",
+    UDim2.new(1,
+    0,
+    0,
+    32),
+    {Background = State.Theme.Surface,
+    Radius = 9,
+    TextSize = 11})
+ThemeSearch.Position = UDim2.fromOffset(0, 72)
+ThemeGridFrame = MakeScroll(ThemePage,
+    "ThemeGrid",
+    UDim2.fromOffset(0,
+    112),
+    UDim2.new(1,
+    0,
+    1,
+    -112),
+    {Background = State.Theme.Bg,
+    Radius = 10,
+    Padding = 8,
+    PaddingLeft = 8,
+    PaddingTop = 8,
+    PaddingRight = 8})
+local themeListLayout = ThemeGridFrame:FindFirstChildOfClass("UIListLayout")
+if themeListLayout then themeListLayout:Destroy() end
+local ThemeLayout = AddGrid(ThemeGridFrame, UDim2.new(0.5, -7, 0, 88), UDim2.fromOffset(8, 8), 2)
+ThemeGridFrame.AutomaticCanvasSize = Enum.AutomaticSize.None
+ThemeGridFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ThemeLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ThemeGridFrame.CanvasSize = UDim2.new(0, 0, 0, ThemeLayout.AbsoluteContentSize.Y + 20)
+end)
+
+local function ClearContainer(container, keepLayouts)
+    for _, child in ipairs(container:GetChildren()) do
+        if keepLayouts and (child:IsA("UIListLayout") or child:IsA("UIGridLayout") or child:IsA("UIPadding")) then
+            -- Preserve layout objects.
+        else
+            child:Destroy()
+        end
+    end
+end
+
+-- Theme application is centralized so all live controls can be updated together.
+local function ApplyTheme(index)
+    index = Clamp(tonumber(index) or 1, 1, #Themes)
+    State.ThemeIndex = index
+    State.Theme = Themes[index]
+    local theme = State.Theme
+    local propertyColors = {
+        [MainWindow] = {BackgroundColor3 = theme.Bg},
+        [TopBar] = {BackgroundColor3 = theme.Panel},
+        [TopBarMask] = {BackgroundColor3 = theme.Panel},
+        [Logo] = {BackgroundColor3 = theme.Surface},
+        [StatusPill] = {BackgroundColor3 = theme.Surface},
+        [Sidebar] = {BackgroundColor3 = theme.Panel},
+        [SidebarFooter] = {BackgroundColor3 = theme.Surface},
+        [ChatPanel] = {BackgroundColor3 = theme.Bg},
+        [ComposerBar] = {BackgroundColor3 = theme.Panel},
+        [ChannelTag] = {BackgroundColor3 = theme.Surface},
+        [ChatSearch] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [Composer] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [DMComposer] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [DMSearch] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [AIComposer] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [ThemeSearch] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+        [GallerySearch] = {BackgroundColor3 = theme.Surface,
+            PlaceholderColor3 = theme.Muted,
+            TextColor3 = theme.Text},
+    }
+    for object, properties in pairs(propertyColors) do
+        if object and object.Parent then
+            for property, value in pairs(properties) do
+                pcall(function() object[property] = value end)
+            end
+        end
+    end
+    pcall(function() MainStroke.Color = theme.Accent end)
+    pcall(function() LogoStroke.Color = theme.Accent end)
+    pcall(function() MainGradient.Color = ColorSequence.new(theme.Accent, theme.Accent2) end)
+    local colorTargets = {
+        {Title, theme.Text}, {Subtitle, theme.Muted}, {StatusText, theme.Text},
+        {SidebarTitle, theme.Muted}, {FooterCreator, theme.Muted}, {FooterName, theme.Accent2},
+        {PageTitle, theme.Text}, {PageDescription, theme.Muted}, {ChatHeaderStatus, theme.Muted},
+        {ChatMessageCounter,
+            theme.Muted},
+            {ChatSafetyText,
+            theme.Muted},
+            {DMTargetLabel,
+            theme.Muted},
+        {DMHint, theme.Muted}, {MessageEmptyState, theme.Muted},
+    }
+    for _, pair in ipairs(colorTargets) do
+        local object, color = pair[1], pair[2]
+        if object and object.Parent then
+            pcall(function() object.TextColor3 = color end)
+        end
+    end
+    for _, button in pairs(NavButtons) do
+        if button and button.Parent then
+            button.BackgroundColor3 = State.ActiveTab == button.Name and theme.Surface or theme.Panel
+            button.TextColor3 = State.ActiveTab == button.Name and theme.Accent2 or theme.Muted
+        end
+    end
+    for _, child in ipairs(ToastLayer:GetChildren()) do
+        if child:IsA("Frame") then
+            child.BackgroundColor3 = theme.Panel
+        end
+    end
+    RebuildChatView()
+    if ThemeGridFrame then
+        -- Rebuild the palette preview to ensure the active border is accurate.
+        local search = ThemeSearch.Text
+        task.defer(function()
+            if ThemeSearch.Parent then
+                ThemeSearch.Text = search
+            end
+        end)
+    end
+end
+_G.__EMILY_RECHAT_APPLY_THEME = ApplyTheme
+
+local function BuildThemeGrid(filterText)
+    ClearContainer(ThemeGridFrame, true)
+    local filter = string.lower(filterText or "")
+    for index, theme in ipairs(Themes) do
+        if filter == "" or string.find(string.lower(theme.Name), filter, 1, true) then
+            local card = Create("Frame", {
+                BackgroundColor3 = theme.Panel,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0.5, -8, 0, 88),
+                LayoutOrder = index,
+            }, ThemeGridFrame)
+            Round(card, 10)
+            Outline(card,
+                index == State.ThemeIndex and theme.Accent2 or theme.Surface,
+                index == State.ThemeIndex and 2 or 1,
+                0.2)
+            local preview = Create("Frame", {
+                BackgroundColor3 = theme.Accent,
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(8, 8),
+                Size = UDim2.fromOffset(28, 28),
+            }, card)
+            Round(preview, 9)
+            local preview2 = Create("Frame", {
+                BackgroundColor3 = theme.Accent2,
+                BorderSizePixel = 0,
+                Position = UDim2.fromOffset(41, 8),
+                Size = UDim2.fromOffset(28, 28),
+            }, card)
+            Round(preview2, 9)
+            MakeLabel(card,
+                theme.Name,
+                UDim2.new(1,
+                -16,
+                0,
+                17),
+                UDim2.fromOffset(8,
+                42),
+                10,
+                theme.Text,
+                Enum.Font.GothamBold)
+            MakeLabel(card,
+                index == State.ThemeIndex and "ACTIVE" or "SELECT",
+                UDim2.new(1,
+                -16,
+                0,
+                13),
+                UDim2.fromOffset(8,
+                62),
+                8,
+                theme.Accent2,
+                Enum.Font.GothamSemibold)
+            local click = Create("TextButton", {
+                BackgroundTransparency = 1,
+                Text = "",
+                Size = UDim2.fromScale(1, 1),
+                ZIndex = 5,
+            }, card)
+            click.Activated:Connect(function()
+                ApplyTheme(index)
+                BuildThemeGrid(ThemeSearch.Text)
+                Notify("Theme applied", theme.Name .. " is now active.", "success", 2)
+            end)
+        end
+    end
+end
+ThemeSearch:GetPropertyChangedSignal("Text"):Connect(function()
+    BuildThemeGrid(ThemeSearch.Text)
+end)
+BuildThemeGrid("")
+
+--// Build GALLERY page ----------------------------------------------------------
+local GalleryPage = MakePage("GALLERY")
+local GalleryIntro = MakeCard(GalleryPage, UDim2.new(1, 0, 0, 65), {Radius = 12})
+MakeLabel(GalleryIntro,
+    "STICKERS & REACTIONS",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(10,
+    7),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(GalleryIntro,
+    "Tap a sticker to insert it into the chat composer. Nothing is sent automatically.",
+    UDim2.new(1,
+    -20,
+    0,
+    28),
+    UDim2.fromOffset(10,
+    28),
+    10,
+    State.Theme.Muted)
+GallerySearch = MakeTextBox(GalleryPage,
+    "Search stickers...",
+    UDim2.new(1,
+    0,
+    0,
+    32),
+    {Background = State.Theme.Surface,
+    Radius = 9,
+    TextSize = 11})
+GallerySearch.Position = UDim2.fromOffset(0, 72)
+GalleryScroll = MakeScroll(GalleryPage,
+    "StickerGrid",
+    UDim2.fromOffset(0,
+    112),
+    UDim2.new(1,
+    0,
+    1,
+    -112),
+    {Background = State.Theme.Bg,
+    Radius = 10,
+    Padding = 8,
+    PaddingLeft = 8,
+    PaddingTop = 8,
+    PaddingRight = 8})
+local galleryListLayout = GalleryScroll:FindFirstChildOfClass("UIListLayout")
+if galleryListLayout then galleryListLayout:Destroy() end
+local GalleryGridLayout = AddGrid(GalleryScroll,
+    UDim2.new(0.25,
+    -7,
+    0,
+    76),
+    UDim2.fromOffset(7,
+    7),
+    4)
+GalleryScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+GalleryGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    GalleryScroll.CanvasSize = UDim2.new(0, 0, 0, GalleryGridLayout.AbsoluteContentSize.Y + 18)
+end)
+
+local function BuildGallery(filterText)
+    ClearContainer(GalleryScroll, true)
+    local filter = string.lower(filterText or "")
+    for index, sticker in ipairs(Stickers) do
+        if filter == "" or string.find(string.lower(sticker.Name .. " " .. sticker.Emoji),
+            filter,
+            1,
+            true) then
+            local card = Create("TextButton", {
+                AutoButtonColor = false,
+                BackgroundColor3 = State.Theme.Panel,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0.25, -7, 0, 76),
+                Text = "",
+                LayoutOrder = index,
+            }, GalleryScroll)
+            Round(card, 10)
+            Outline(card, State.Theme.Surface, 1, 0.2)
+            MakeLabel(card,
+                sticker.Emoji,
+                UDim2.new(1,
+                0,
+                0,
+                43),
+                UDim2.new(),
+                23,
+                State.Theme.Text,
+                Enum.Font.Gotham)
+            local itemName = MakeLabel(card,
+                sticker.Name,
+                UDim2.new(1,
+                -8,
+                0,
+                18),
+                UDim2.new(0,
+                4,
+                1,
+                -21),
+                8,
+                State.Theme.Muted,
+                Enum.Font.GothamSemibold)
+            itemName.TextXAlignment = Enum.TextXAlignment.Center
+            card.Activated:Connect(function()
+                if Composer then
+                    Composer.Text = (Composer.Text or "") .. sticker.Emoji
+                    Composer:CaptureFocus()
+                    Composer.CursorPosition = #Composer.Text + 1
+                end
+                Notify("Sticker inserted",
+                    sticker.Name .. " added to your composer.",
+                    "success",
+                    1.5)
+            end)
+        end
+    end
+end
+GallerySearch:GetPropertyChangedSignal("Text"):Connect(function()
+    BuildGallery(GallerySearch.Text)
+end)
+BuildGallery("")
+
+--// Build PROFILE page ----------------------------------------------------------
+local ProfilePage = MakePage("PROFILE")
+local ProfileCard = MakeCard(ProfilePage, UDim2.new(1, 0, 0, 145), {Radius = 13})
+local ProfileAvatar = Create("ImageLabel", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(14, 14),
+    Size = UDim2.fromOffset(82, 82),
+    Image = "",
+}, ProfileCard)
+Round(ProfileAvatar, 18)
+Outline(ProfileAvatar, State.Theme.Accent, 1.3, 0.18)
+MakeLabel(ProfileCard,
+    LocalPlayer.DisplayName,
+    UDim2.new(1,
+    -120,
+    0,
+    24),
+    UDim2.fromOffset(108,
+    16),
+    15,
+    State.Theme.Text,
+    Enum.Font.GothamBold)
+MakeLabel(ProfileCard,
+    "@" .. LocalPlayer.Name,
+    UDim2.new(1,
+    -120,
+    0,
+    18),
+    UDim2.fromOffset(108,
+    42),
+    10,
+    State.Theme.Muted)
+local ProfileOnlineBadge = Create("Frame", {
+    BackgroundColor3 = Color3.fromRGB(44, 171, 101),
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(108, 67),
+    Size = UDim2.fromOffset(80, 22),
+}, ProfileCard)
+Round(ProfileOnlineBadge, 8)
+MakeLabel(ProfileOnlineBadge,
+    "● ONLINE",
+    UDim2.fromScale(1,
+    1),
+    UDim2.new(),
+    8,
+    Color3.fromRGB(241,
+    255,
+    247),
+    Enum.Font.GothamBold)
+MakeLabel(ProfileCard,
+    "Your Roblox identity remains unchanged.",
+    UDim2.new(1,
+    -25,
+    0,
+    18),
+    UDim2.fromOffset(14,
+    113),
+    9,
+    State.Theme.Muted)
+
+local RPNameCard = MakeCard(ProfilePage, UDim2.new(1, 0, 0, 88), {Radius = 12})
+RPNameCard.Position = UDim2.fromOffset(0, 153)
+MakeLabel(RPNameCard,
+    "ROLEPLAY DISPLAY NAME",
+    UDim2.new(1,
+    -20,
+    0,
+    16),
+    UDim2.fromOffset(10,
+    7),
+    9,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+ProfileNameInput = MakeTextBox(RPNameCard,
+    "Local display label",
+    UDim2.new(1,
+    -102,
+    0,
+    33),
+    {Background = State.Theme.Surface,
+    Text = State.RPName,
+    Radius = 8,
+    TextSize = 11})
+ProfileNameInput.Position = UDim2.fromOffset(9, 37)
+local SaveRPName = MakeButton(RPNameCard, "SAVE", UDim2.fromOffset(79, 33), function()
+    State.RPName = Truncate(ProfileNameInput.Text, 30)
+    ProfileNameInput.Text = State.RPName
+    RebuildChatView()
+    Notify("Profile updated", "Local RP display label saved for this session.", "success")
+end, {Background = State.Theme.Accent, Hover = State.Theme.Accent2, TextSize = 9, Radius = 8})
+SaveRPName.Position = UDim2.new(1, -88, 0, 37)
+
+local BioCard = MakeCard(ProfilePage, UDim2.new(1, 0, 0, 98), {Radius = 12})
+BioCard.Position = UDim2.fromOffset(0, 249)
+MakeLabel(BioCard,
+    "PROFILE BIO",
+    UDim2.new(1,
+    -20,
+    0,
+    16),
+    UDim2.fromOffset(10,
+    7),
+    9,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+ProfileBioInput = MakeTextBox(BioCard,
+    "Write a short bio...",
+    UDim2.new(1,
+    -102,
+    0,
+    39),
+    {Background = State.Theme.Surface,
+    Text = State.Bio,
+    Radius = 8,
+    TextSize = 10,
+    Wrapped = true,
+    MultiLine = true,
+    TextYAlignment = Enum.TextYAlignment.Top})
+ProfileBioInput.Position = UDim2.fromOffset(9, 36)
+local SaveBio = MakeButton(BioCard, "SAVE", UDim2.fromOffset(79, 39), function()
+    State.Bio = Truncate(ProfileBioInput.Text, 90)
+    ProfileBioInput.Text = State.Bio
+    Notify("Bio updated", "Local profile bio saved for this session.", "success")
+end, {Background = State.Theme.Accent, Hover = State.Theme.Accent2, TextSize = 9, Radius = 8})
+SaveBio.Position = UDim2.new(1, -88, 0, 36)
+
+local ProfileStats = Create("Frame", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(0, 357),
+    Size = UDim2.new(1, 0, 0, 80),
+}, ProfilePage)
+local StatsLayout = AddGrid(ProfileStats, UDim2.new(0.333, -6, 0, 70), UDim2.fromOffset(8, 8), 3)
+local function CreateStatCard(title, value, order)
+    local card = MakeCard(ProfileStats, UDim2.new(0.333, -6, 0, 70), {Radius = 10})
+    card.LayoutOrder = order
+    MakeLabel(card,
+        title,
+        UDim2.new(1,
+        -12,
+        0,
+        14),
+        UDim2.fromOffset(6,
+        10),
+        8,
+        State.Theme.Muted,
+        Enum.Font.GothamBold)
+    MakeLabel(card,
+        value,
+        UDim2.new(1,
+        -12,
+        0,
+        26),
+        UDim2.fromOffset(6,
+        30),
+        14,
+        State.Theme.Accent2,
+        Enum.Font.GothamBlack)
+    return card
+end
+CreateStatCard("ACCOUNT AGE", tostring(LocalPlayer.AccountAge) .. "d", 1)
+CreateStatCard("MESSAGES", tostring(State.MessageCount), 2)
+CreateStatCard("THEMES", tostring(#Themes), 3)
+
+local function UpdateProfileAvatar()
+    task.spawn(function()
+        local ok, image = pcall(function()
+            return Players:GetUserThumbnailAsync(LocalPlayer.UserId,
+                Enum.ThumbnailType.HeadShot,
+                Enum.ThumbnailSize.Size150x150)
+        end)
+        if ok and ProfileAvatar.Parent then
+            ProfileAvatar.Image = image
+        end
+    end)
+end
+UpdateProfileAvatar()
+
+--// Build SETTINGS page ---------------------------------------------------------
+local SettingsPage = MakePage("SETTINGS")
+SettingsScroll = MakeScroll(SettingsPage,
+    "SettingsScroll",
+    UDim2.new(),
+    UDim2.fromScale(1,
+    1),
+    {Background = State.Theme.Bg,
+    Radius = 10,
+    Padding = 9,
+    PaddingLeft = 5,
+    PaddingTop = 5,
+    PaddingRight = 5})
+local settingsListLayout = SettingsScroll:FindFirstChildOfClass("UIListLayout")
+if settingsListLayout then settingsListLayout:Destroy() end
+local SettingsLayout = AddList(SettingsScroll, Enum.FillDirection.Vertical, 8)
+SettingsScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+SettingsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    SettingsScroll.CanvasSize = UDim2.new(0, 0, 0, SettingsLayout.AbsoluteContentSize.Y + 20)
+end)
+
+local function SettingRow(title, description, initialValue, callback)
+    local row = Create("Frame", {
+        BackgroundColor3 = State.Theme.Panel,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -4, 0, 62),
+    }, SettingsScroll)
+    Round(row, 10)
+    MakeLabel(row,
+        title,
+        UDim2.new(1,
+        -112,
+        0,
+        18),
+        UDim2.fromOffset(11,
+        8),
+        10,
+        State.Theme.Text,
+        Enum.Font.GothamBold)
+    MakeLabel(row,
+        description,
+        UDim2.new(1,
+        -112,
+        0,
+        24),
+        UDim2.fromOffset(11,
+        29),
+        9,
+        State.Theme.Muted)
+    local toggle
+    toggle = MakeButton(row, initialValue and "ON" or "OFF", UDim2.fromOffset(67, 30), function()
+        initialValue = not initialValue
+        toggle.Text = initialValue and "ON" or "OFF"
+        toggle.BackgroundColor3 = initialValue and State.Theme.Accent or State.Theme.Surface
+        if callback then callback(initialValue) end
+    end,
+        {Background = initialValue and State.Theme.Accent or State.Theme.Surface,
+        Hover = State.Theme.Accent2,
+        TextSize = 10,
+        Radius = 9})
+    toggle.AnchorPoint = Vector2.new(1, 0.5)
+    toggle.Position = UDim2.new(1, -10, 0.5, 0)
+    return row, toggle
+end
+
+SettingRow("RGB BORDER",
+    "Animate the outline gradient around the main panel.",
+    State.RGBBorder,
+    function(value)
+    State.RGBBorder = value
+end)
+SettingRow("MESSAGE TIMESTAMPS",
+    "Show local receive time on the message cards.",
+    State.Timestamps,
+    function(value)
+    State.Timestamps = value
+    RebuildChatView()
+end)
+SettingRow("COMPACT MESSAGES",
+    "Use smaller message cards to show more chat.",
+    State.CompactMessages,
+    function(value)
+    State.CompactMessages = value
+    RebuildChatView()
+end)
+SettingRow("NOTIFICATIONS",
+    "Show small in-panel status notifications.",
+    State.ShowNotifications,
+    function(value)
+    State.ShowNotifications = value
+end)
+SettingRow("ENTER TO SEND",
+    "Press Enter in the composer to submit one message.",
+    State.EnterToSend,
+    function(value)
+    State.EnterToSend = value
+end)
+SettingRow("UI SOUND FLAG",
+    "Currently silent; reserved for future native UI feedback.",
+    State.SoundEnabled,
+    function(value)
+    State.SoundEnabled = value
+end)
+SettingRow("VOICE UI PREVIEW",
+    "Visual indicator only; voice controls remain Roblox-native.",
+    State.VoicePreview,
+    function(value)
+    State.VoicePreview = value
+    if VoiceIndicator then
+        VoiceIndicator.Text = value and "VOICE UI PREVIEW: ON" or "VOICE UI PREVIEW: OFF"
+    end
+end)
+
+local TransparencyCard = MakeCard(SettingsScroll, UDim2.new(1, -4, 0, 77), {Radius = 10})
+MakeLabel(TransparencyCard,
+    "PANEL TRANSPARENCY",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    7),
+    10,
+    State.Theme.Text,
+    Enum.Font.GothamBold)
+local TransparencyValue = MakeLabel(TransparencyCard,
+    "2%",
+    UDim2.new(0,
+    50,
+    0,
+    18),
+    UDim2.new(1,
+    -61,
+    0,
+    7),
+    9,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+TransparencyValue.TextXAlignment = Enum.TextXAlignment.Right
+local TransparencyDown = MakeButton(TransparencyCard, "−", UDim2.fromOffset(36, 29), function()
+    State.WindowTransparency = Clamp(State.WindowTransparency - 0.04, 0, 0.35)
+    MainWindow.BackgroundTransparency = State.WindowTransparency
+    TransparencyValue.Text = tostring(math.floor(State.WindowTransparency * 100)) .. "%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 14, Radius = 8})
+TransparencyDown.Position = UDim2.fromOffset(11, 39)
+local TransparencyUp = MakeButton(TransparencyCard, "+", UDim2.fromOffset(36, 29), function()
+    State.WindowTransparency = Clamp(State.WindowTransparency + 0.04, 0, 0.35)
+    MainWindow.BackgroundTransparency = State.WindowTransparency
+    TransparencyValue.Text = tostring(math.floor(State.WindowTransparency * 100)) .. "%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 14, Radius = 8})
+TransparencyUp.Position = UDim2.fromOffset(53, 39)
+local TransparencyReset = MakeButton(TransparencyCard, "RESET", UDim2.fromOffset(70, 29), function()
+    State.WindowTransparency = 0.02
+    MainWindow.BackgroundTransparency = State.WindowTransparency
+    TransparencyValue.Text = "2%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 9, Radius = 8})
+TransparencyReset.Position = UDim2.fromOffset(96, 39)
+
+local ScaleCard = MakeCard(SettingsScroll, UDim2.new(1, -4, 0, 77), {Radius = 10})
+MakeLabel(ScaleCard,
+    "WINDOW SCALE",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    7),
+    10,
+    State.Theme.Text,
+    Enum.Font.GothamBold)
+local ScaleValue = MakeLabel(ScaleCard,
+    "100%",
+    UDim2.new(0,
+    50,
+    0,
+    18),
+    UDim2.new(1,
+    -61,
+    0,
+    7),
+    9,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+ScaleValue.TextXAlignment = Enum.TextXAlignment.Right
+local ScaleDown = MakeButton(ScaleCard, "−", UDim2.fromOffset(36, 29), function()
+    UserScale = Clamp(UserScale - 0.05, 0.65, 1.15)
+    UpdateResponsiveScale()
+    ScaleValue.Text = tostring(math.floor(UserScale * 100)) .. "%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 14, Radius = 8})
+ScaleDown.Position = UDim2.fromOffset(11, 39)
+local ScaleUp = MakeButton(ScaleCard, "+", UDim2.fromOffset(36, 29), function()
+    UserScale = Clamp(UserScale + 0.05, 0.65, 1.15)
+    UpdateResponsiveScale()
+    ScaleValue.Text = tostring(math.floor(UserScale * 100)) .. "%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 14, Radius = 8})
+ScaleUp.Position = UDim2.fromOffset(53, 39)
+local ScaleReset = MakeButton(ScaleCard, "RESET", UDim2.fromOffset(70, 29), function()
+    UserScale = 1
+    UpdateResponsiveScale()
+    ScaleValue.Text = "100%"
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 9, Radius = 8})
+ScaleReset.Position = UDim2.fromOffset(96, 39)
+
+local SettingsActions = MakeCard(SettingsScroll, UDim2.new(1, -4, 0, 112), {Radius = 10})
+MakeLabel(SettingsActions,
+    "LOCAL ACTIONS",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    7),
+    10,
+    State.Theme.Text,
+    Enum.Font.GothamBold)
+MakeLabel(SettingsActions,
+    "Reset affects only this interface, not Roblox chat history.",
+    UDim2.new(1,
+    -20,
+    0,
+    16),
+    UDim2.fromOffset(11,
+    26),
+    9,
+    State.Theme.Muted)
+local ClearLocalButton = MakeButton(SettingsActions,
+    "CLEAR CHAT VIEW",
+    UDim2.new(0.49,
+    -6,
+    0,
+    31),
+    function()
+    State.MessageHistory = {}
+    State.MessageCount = 0
+    State.MessageObjects = {}
+    RebuildChatView()
+    AddSystemMessage("Local chat panel cleared.")
+    Notify("Cleared", "Only the EMILY RECHAT view was cleared.", "success")
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 9, Radius = 8})
+ClearLocalButton.Position = UDim2.fromOffset(10, 65)
+local ResetUIToggles = MakeButton(SettingsActions,
+    "RESET UI",
+    UDim2.new(0.49,
+    -6,
+    0,
+    31),
+    function()
+    State.RGBBorder = true
+    State.Timestamps = true
+    State.CompactMessages = false
+    State.EnterToSend = true
+    State.ShowNotifications = true
+    State.WindowTransparency = 0.02
+    RootScale.Scale = 1
+    MainWindow.BackgroundTransparency = 0.02
+    ScaleValue.Text = "100%"
+    TransparencyValue.Text = "2%"
+    ApplyTheme(1)
+    RebuildChatView()
+    Notify("Reset complete", "Visual settings returned to defaults.", "success")
+end, {Background = State.Theme.Surface, Hover = State.Theme.Accent, TextSize = 9, Radius = 8})
+ResetUIToggles.Position = UDim2.new(0.51, 0, 0, 65)
+
+VoiceIndicator = MakeLabel(SettingsScroll,
+    "VOICE UI PREVIEW: OFF",
+    UDim2.new(1,
+    -4,
+    0,
+    28),
+    UDim2.new(),
+    9,
+    State.Theme.Muted,
+    Enum.Font.GothamBold)
+VoiceIndicator.BackgroundColor3 = State.Theme.Panel
+VoiceIndicator.BackgroundTransparency = 0
+Round(VoiceIndicator, 8)
+
+--// Build COMMANDS page ---------------------------------------------------------
+local CommandsPage = MakePage("COMMANDS")
+local CommandsIntro = MakeCard(CommandsPage, UDim2.new(1, 0, 0, 65), {Radius = 12})
+MakeLabel(CommandsIntro,
+    "QUICK COMMANDS",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(10,
+    7),
+    11,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(CommandsIntro,
+    "Commands affect this UI unless a message command is explicitly sent through Roblox chat.",
+    UDim2.new(1,
+    -20,
+    0,
+    30),
+    UDim2.fromOffset(10,
+    28),
+    9,
+    State.Theme.Muted)
+local CommandsScroll = MakeScroll(CommandsPage,
+    "CommandsScroll",
+    UDim2.fromOffset(0,
+    73),
+    UDim2.new(1,
+    0,
+    1,
+    -73),
+    {Background = State.Theme.Bg,
+    Radius = 10,
+    Padding = 8,
+    PaddingLeft = 8,
+    PaddingTop = 8,
+    PaddingRight = 8})
+local CommandRows = {
+    {Command="/help", Description="Show the command help notification."},
+    {Command="/clear", Description="Clear the local EMILY RECHAT transcript."},
+    {Command="/ai question", Description="Switch to FC AI, the offline helper."},
+    {Command="/nick YOUR NAME",
+        Description="Update your local RP label only; Roblox identity does not change."},
+    {Command="/bio YOUR BIO", Description="Update the local profile bio."},
+    {Command="/theme NAME", Description="Switch to a matching theme by name."},
+    {Command="/mute USERNAME", Description="Hide received messages from a user in this panel."},
+    {Command="/unmute USERNAME", Description="Show a locally muted user's messages again."},
+    {Command="/reply USERNAME", Description="Insert a quick reply prefix for a player."},
+    {Command="/sticker", Description="Open the sticker gallery."},
+    {Command="/me ACTION",
+        Description="Add a local roleplay action card. It is not a server chat spoof."},
+}
+for index, command in ipairs(CommandRows) do
+    local row = Create("Frame", {
+        BackgroundColor3 = State.Theme.Panel,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1, -2, 0, 55),
+        LayoutOrder = index,
+    }, CommandsScroll)
+    Round(row, 9)
+    local name = MakeLabel(row,
+        command.Command,
+        UDim2.new(1,
+        -20,
+        0,
+        19),
+        UDim2.fromOffset(10,
+        6),
+        10,
+        State.Theme.Accent2,
+        Enum.Font.GothamBold)
+    local desc = MakeLabel(row,
+        command.Description,
+        UDim2.new(1,
+        -20,
+        0,
+        20),
+        UDim2.fromOffset(10,
+        28),
+        9,
+        State.Theme.Muted)
+    desc.TextTruncate = Enum.TextTruncate.AtEnd
+    row.LayoutOrder = index
+end
+
+--// Build ABOUT page ------------------------------------------------------------
+local AboutPage = MakePage("ABOUT")
+local AboutHero = MakeCard(AboutPage, UDim2.new(1, 0, 0, 125), {Radius = 13})
+local AboutMark = Create("Frame", {
+    BackgroundColor3 = State.Theme.Surface,
+    BorderSizePixel = 0,
+    Position = UDim2.fromOffset(15, 17),
+    Size = UDim2.fromOffset(74, 74),
+}, AboutHero)
+Round(AboutMark, 20)
+Outline(AboutMark, State.Theme.Accent, 1.5, 0.1)
+MakeLabel(AboutMark,
+    "ER",
+    UDim2.fromScale(1,
+    1),
+    UDim2.new(),
+    22,
+    State.Theme.Accent2,
+    Enum.Font.GothamBlack)
+MakeLabel(AboutHero,
+    APP_NAME,
+    UDim2.new(1,
+    -115,
+    0,
+    26),
+    UDim2.fromOffset(104,
+    19),
+    17,
+    State.Theme.Text,
+    Enum.Font.GothamBlack)
+MakeLabel(AboutHero,
+    "Version " .. APP_VERSION,
+    UDim2.new(1,
+    -115,
+    0,
+    18),
+    UDim2.fromOffset(104,
+    47),
+    10,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(AboutHero,
+    "Creator: " .. APP_CREATOR,
+    UDim2.new(1,
+    -115,
+    0,
+    18),
+    UDim2.fromOffset(104,
+    71),
+    10,
+    State.Theme.Muted)
+
+local AboutInfo = MakeCard(AboutPage, UDim2.new(1, 0, 0, 160), {Radius = 12})
+AboutInfo.Position = UDim2.fromOffset(0, 135)
+MakeLabel(AboutInfo,
+    "FEATURES",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    9),
+    10,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(AboutInfo,
+    "• Premium dark interface with animated accent border\n" ..
+    "• Public chat through TextChatService\n" ..
+    "• Native whisper command path when the experience supports it\n" ..
+    "• Local profile, offline AI prompts, sticker gallery and themes\n" ..
+    "• Player muting for this panel, message search and compact mode\n" ..
+    "• Drag, minimize, restore, keyboard shortcut and responsive scaling",
+    UDim2.new(1, -22, 0, 120), UDim2.fromOffset(11, 32), 10, State.Theme.Text)
+local AboutDisclaimer = MakeCard(AboutPage, UDim2.new(1, 0, 0, 96), {Radius = 12})
+AboutDisclaimer.Position = UDim2.fromOffset(0, 301)
+MakeLabel(AboutDisclaimer,
+    "PLATFORM NOTE",
+    UDim2.new(1,
+    -20,
+    0,
+    18),
+    UDim2.fromOffset(11,
+    8),
+    10,
+    State.Theme.Accent2,
+    Enum.Font.GothamBold)
+MakeLabel(AboutDisclaimer,
+    "The UI cannot override server chat permissions, filters, or identity. A normal Roblox LocalScript uses PlayerGui; CoreGui is Roblox-controlled and may reject access.",
+    UDim2.new(1,
+    -22,
+    0,
+    56),
+    UDim2.fromOffset(11,
+    31),
+    9,
+    State.Theme.Muted)
+
+--// Navigation ---------------------------------------------------------------
+local Navigation = {
+    {Name="CHAT", Icon="◈", Description="Your conversations, one clean workspace."},
+    {Name="DM", Icon="✉", Description="Select a player and use the native whisper path."},
+    {Name="AI", Icon="✧", Description="Offline chat ideas powered by local prompts."},
+    {Name="THEME", Icon="◐", Description="Pick an accent palette for the full interface."},
+    {Name="GALLERY", Icon="☺", Description="Insert stickers and reactions into the composer."},
+    {Name="PROFILE", Icon="♙", Description="Edit a local RP name and profile bio."},
+    {Name="SETTINGS", Icon="⚙", Description="Customize message cards, transparency and scale."},
+    {Name="COMMANDS", Icon="⌘", Description="See available local commands and how they work."},
+    {Name="ABOUT", Icon="ⓘ", Description="Version, creator and platform notes."},
+}
+
+CurrentTabBadge = Create("TextLabel", {
+    BackgroundColor3 = State.Theme.Accent,
+    BorderSizePixel = 0,
+    AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -6, 0, 7),
+    Size = UDim2.fromOffset(18, 18),
+    Font = Enum.Font.GothamBold,
+    Text = "0",
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+    TextSize = 9,
+    Visible = false,
+    ZIndex = 8,
+}, Sidebar)
+Round(CurrentTabBadge, 9)
+
+UpdateNavigation = function(activeName)
+    for name, button in pairs(NavButtons) do
+        local active = name == activeName
+        button.BackgroundColor3 = active and State.Theme.Surface or State.Theme.Panel
+        button.TextColor3 = active and State.Theme.Accent2 or State.Theme.Muted
+        local stroke = button:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Transparency = active and 0.3 or 1
+            stroke.Color = State.Theme.Accent
+        end
+    end
+    State.ActiveTab = activeName
+    if Pages[activeName] then
+        for name, page in pairs(Pages) do
+            page.Visible = name == activeName
+        end
+        PageTitle.Text = activeName
+        for _, nav in ipairs(Navigation) do
+            if nav.Name == activeName then
+                PageDescription.Text = nav.Description
+                break
+            end
+        end
+    end
+    if activeName == "CHAT" or activeName == "DM" then
+        State.Unread = 0
+        CurrentTabBadge.Visible = false
+    end
+end
+
+for index, item in ipairs(Navigation) do
+    local button = MakeButton(SidebarButtons,
+        item.Icon .. "   " .. item.Name,
+        UDim2.new(1,
+        0,
+        0,
+        39),
+        function()
+        UpdateNavigation(item.Name)
+        if item.Name == "DM" then
+            RebuildDMPlayers(DMSearch.Text)
+        elseif item.Name == "PROFILE" then
+            UpdateProfileAvatar()
+        elseif item.Name == "CHAT" then
+            ScrollChatToBottom()
+        end
+    end, {
+        Background = State.Theme.Panel,
+        Hover = State.Theme.Surface,
+        Radius = 9,
+        TextSize = 10,
+        TextColor = State.Theme.Muted,
+        Stroke = true,
+        StrokeColor = State.Theme.Accent,
+        StrokeTransparency = 1,
+    })
+    button.Name = item.Name
+    button.LayoutOrder = index
+    button.TextXAlignment = Enum.TextXAlignment.Left
+    AddPadding(button, 10, 0, 5, 0)
+    NavButtons[item.Name] = button
+end
+
+--// Drag handling --------------------------------------------------------------
+local function BeginDrag(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        Dragging = true
+        DragStart = input.Position
+        StartPosition = MainWindow.Position
+        CurrentDragInput = input
+    end
+end
+
+local function UpdateDrag(input)
+    if Dragging and StartPosition and DragStart then
+        local delta = input.Position - DragStart
+        local newPosition = UDim2.new(
+            StartPosition.X.Scale,
+            StartPosition.X.Offset + delta.X,
+            StartPosition.Y.Scale,
+            StartPosition.Y.Offset + delta.Y
+        )
+        MainWindow.Position = newPosition
+    end
+end
+
+local function EndDrag(input)
+    if input == CurrentDragInput or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Dragging = false
+        CurrentDragInput = nil
+        DragStart = nil
+        StartPosition = nil
+    end
+end
+
+TopBar.InputBegan:Connect(BeginDrag)
+UserInputService.InputChanged:Connect(function(input)
+    if Dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        UpdateDrag(input)
+    end
+end)
+UserInputService.InputEnded:Connect(EndDrag)
+
+--// Minimize / close / restore -------------------------------------------------
+local function EnsureFloatingButton()
+    if FloatingButton and FloatingButton.Parent then
+        return
+    end
+    FloatingButton = Create("TextButton", {
+        Name = "EMILY_RECHAT_FLOATING_ICON",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -20, 1, -100),
+        Size = UDim2.fromOffset(58, 58),
+        BackgroundColor3 = State.Theme.Panel,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Font = Enum.Font.GothamBlack,
+        Text = "⚡",
+        TextColor3 = State.Theme.Accent2,
+        TextSize = 27,
+        Visible = false,
+        ZIndex = 60,
+    }, Gui)
+    Round(FloatingButton, 29)
+    Outline(FloatingButton, State.Theme.Accent, 2, 0.05)
+    FloatingButton.Activated:Connect(function()
+        State.Minimized = false
+        State.Closed = false
+        MainWindow.Visible = true
+        FloatingButton.Visible = false
+        Fade(MainWindow,
+            {BackgroundTransparency = State.WindowTransparency},
+            0.18,
+            Enum.EasingStyle.Back)
+        MainWindow.Size = UDim2.fromOffset(WINDOW_DESIGN_SIZE.X, WINDOW_DESIGN_SIZE.Y)
+        Backdrop.Visible = false
+        Notify("Welcome back", APP_NAME .. " restored.", "success", 1.6)
+    end)
+    local floatingDragging = false
+    local floatingStart, floatingPos
+    FloatingButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            floatingDragging = true
+            floatingStart = input.Position
+            floatingPos = FloatingButton.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if floatingDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - floatingStart
+            FloatingButton.Position = UDim2.new(floatingPos.X.Scale,
+                floatingPos.X.Offset + delta.X,
+                floatingPos.Y.Scale,
+                floatingPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            floatingDragging = false
+        end
+    end)
+end
+
+local function MinimizeWindow()
+    EnsureFloatingButton()
+    State.Minimized = true
+    State.Closed = false
+    MainWindow.Visible = false
+    Backdrop.Visible = false
+    FloatingButton.Visible = true
+end
+
+local function CloseWindow()
+    State.Closed = true
+    MainWindow.Visible = false
+    Backdrop.Visible = false
+    EnsureFloatingButton()
+    FloatingButton.Visible = true
+    Notify("Panel hidden", "Tap the floating ⚡ icon to reopen EMILY RECHAT.", "info", 2.2)
+end
+
+MinimizeButton.Activated:Connect(MinimizeWindow)
+CloseButton.Activated:Connect(CloseWindow)
+
+--// Responsive layout ----------------------------------------------------------
+function UpdateResponsiveScale()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+    local viewport = camera.ViewportSize
+    local targetScale = math.min(viewport.X / (WINDOW_DESIGN_SIZE.X + 36),
+        viewport.Y / (WINDOW_DESIGN_SIZE.Y + 60))
+    targetScale = Clamp(targetScale, 0.34, 1)
+    if IsTouchOnly() then
+        targetScale = math.min(targetScale, 0.92)
+        Sidebar.Size = UDim2.new(0, 129, 1, -94)
+        Content.Position = UDim2.fromOffset(151, 82)
+        Content.Size = UDim2.new(1, -163, 1, -94)
+    else
+        Sidebar.Size = UDim2.new(0, 155, 1, -94)
+        Content.Position = UDim2.fromOffset(178, 82)
+        Content.Size = UDim2.new(1, -190, 1, -94)
+    end
+    -- Keep the window centred only when it is already near the centre; user drag
+    -- coordinates otherwise remain intact.
+    if math.abs(MainWindow.Position.X.Scale - 0.5) < 0.03 and math.abs(MainWindow.Position.Y.Scale - 0.5) < 0.03 then
+        MainWindow.Position = UDim2.fromScale(0.5, 0.5)
+    end
+    RootScale.Scale = Clamp(targetScale * UserScale, 0.34, 1.30)
+end
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateResponsiveScale)
+end
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    task.wait(0.15)
+    if workspace.CurrentCamera then
+        workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateResponsiveScale)
+    end
+    UpdateResponsiveScale()
+end)
+
+--// Incoming chat integration --------------------------------------------------
+local function OnTextChatMessage(message)
+    if not message then return end
+    local text = tostring(message.Text or "")
+    if text == "" then return end
+    local source = message.TextSource
+    if not source then
+        AddMessage("System",
+            "Roblox",
+            text,
+            "system",
+            {Channel = message.TextChannel and message.TextChannel.Name})
+        return
+    end
+    local sender = Players:GetPlayerByUserId(source.UserId)
+    local username = sender and sender.Name or ("User" .. tostring(source.UserId))
+    if State.IgnoredUsers[username] then
+        return
+    end
+    local displayName = sender and sender.DisplayName or username
+    AddMessage(username, displayName, text, "chat", {
+        UserId = source.UserId,
+        Channel = message.TextChannel and message.TextChannel.Name,
+    })
+end
+
+local messageReceivedConnected = false
+pcall(function()
+    TextChatService.MessageReceived:Connect(OnTextChatMessage)
+    messageReceivedConnected = true
+end)
+if not messageReceivedConnected then
+    warn("[EMILY RECHAT] TextChatService.MessageReceived is not available in this experience.")
+end
+
+--// Player lifecycle ------------------------------------------------------------
+Players.PlayerAdded:Connect(function(target)
+    Notify("Player joined", target.DisplayName .. " joined the server.", "info", 2)
+    if State.ActiveTab == "DM" then
+        RebuildDMPlayers(DMSearch.Text)
+    end
+end)
+Players.PlayerRemoving:Connect(function(target)
+    if State.SelectedDM == target then
+        State.SelectedDM = nil
+        DMTargetLabel.Text = "Selected player left the server. Choose another player."
+    end
+    if State.ActiveTab == "DM" then
+        RebuildDMPlayers(DMSearch.Text)
+    end
+end)
+
+--// Keyboard shortcut -----------------------------------------------------------
+KeepConnection(UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        if State.Minimized or State.Closed or not MainWindow.Visible then
+            EnsureFloatingButton()
+            FloatingButton.Visible = false
+            MainWindow.Visible = true
+            State.Minimized = false
+            State.Closed = false
+        else
+            MinimizeWindow()
+        end
+    elseif input.KeyCode == Enum.KeyCode.Escape then
+        if Composer and Composer:IsFocused() then
+            Composer:ReleaseFocus()
+        elseif MainWindow.Visible then
+            MinimizeWindow()
+        end
+    end
+end))
+
+--// RGB outline animation -------------------------------------------------------
+local rgbConnection
+rgbConnection = RunService.RenderStepped:Connect(function(deltaTime)
+    if State.RGBBorder and MainGradient and MainGradient.Parent then
+        MainGradient.Rotation = (MainGradient.Rotation + deltaTime * 18) % 360
+        local hue = (os.clock() * 0.09) % 1
+        local tint = Color3.fromHSV(hue, 0.75, 1)
+        MainStroke.Color = tint
+        LogoStroke.Color = tint
+        if FloatingButton and FloatingButton.Parent then
+            local floatStroke = FloatingButton:FindFirstChildOfClass("UIStroke")
+            if floatStroke then floatStroke.Color = tint end
+        end
+    end
+end)
+
+--// Initial page selection and startup animation --------------------------------
+UpdateNavigation("CHAT")
+ApplyTheme(1)
+UpdateResponsiveScale()
+EnsureFloatingButton()
+FloatingButton.Visible = false
+MainWindow.Visible = true
+MainWindow.BackgroundTransparency = 1
+MainWindow.Size = UDim2.fromOffset(WINDOW_DESIGN_SIZE.X - 26, WINDOW_DESIGN_SIZE.Y - 20)
+Fade(MainWindow,
+    {BackgroundTransparency = State.WindowTransparency,
+    Size = UDim2.fromOffset(WINDOW_DESIGN_SIZE.X,
+    WINDOW_DESIGN_SIZE.Y)},
+    0.35,
+    Enum.EasingStyle.Back)
+
+AddSystemMessage(APP_NAME .. " ready. Public messages use Roblox TextChatService.")
+AddSystemMessage("Tip: open COMMANDS for /help, /theme, /nick, /bio and local tools.")
+Notify("Welcome", APP_NAME .. " is ready. Made by " .. APP_CREATOR .. ".", "success", 3)
+
+--// Live state refresh ----------------------------------------------------------
+task.spawn(function()
+    while Gui.Parent do
+        if ChatMessageCounter then
+            ChatMessageCounter.Text = tostring(State.MessageCount) .. " messages"
+        end
+        if ChatHeaderStatus then
+            ChatHeaderStatus.Text = IsTextChatReady() and "Roblox TextChatService" or "Native chat required"
+        end
+        task.wait(3)
+    end
+end)
+
+--// Clean exit -----------------------------------------------------------------
+Gui.AncestryChanged:Connect(function(_, parent)
+    if parent == nil then
+        for _, connection in ipairs(ActiveConnections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        if rgbConnection then
+            pcall(function() rgbConnection:Disconnect() end)
+        end
+        if _G.__EMILY_RECHAT_APPLY_THEME == ApplyTheme then
+            _G.__EMILY_RECHAT_APPLY_THEME = nil
+        end
+    end
+end)
+
+--// End of EMILY RECHAT ---------------------------------------------------------
